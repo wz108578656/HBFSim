@@ -88,6 +88,7 @@ std::uint64_t ceil_div(std::uint64_t value, std::uint64_t divisor) {
 const std::unordered_set<std::string>& owned_keys() {
     static const std::unordered_set<std::string> keys{
         "hbm-capacity-bytes", "hbf-capacity-bytes", "hbf-capacity-ratio",
+        "hbf-address-layout",
         "base-die-link-read-bw", "base-die-link-write-bw",
         "base-die-link-latency-ns",
         "hbf-external-direct-link-enable",
@@ -389,6 +390,14 @@ void SystemConfigBuilder::apply(std::string_view key, std::string_view value) {
 
     if (key == "hbf-processor-interconnect") {
         hbf_processor_interconnect_ = value;
+        return;
+    }
+    if (key == "hbf-address-layout") {
+        if (value == "bank-major") hbf_.device.address_layout = physical::hbf::AddressLayout::bank_major;
+        else if (value == "ocp-v070") hbf_.device.address_layout = physical::hbf::AddressLayout::ocp_v070;
+        else
+            throw std::runtime_error(
+                std::string("hbf-address-layout must be bank-major or ocp-v070, got: ") + std::string(value));
         return;
     }
     SET_U32("hbf-speed-grade", hbf_.device.speed_grade)

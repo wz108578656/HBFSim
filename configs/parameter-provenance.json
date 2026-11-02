@@ -192,7 +192,7 @@
       "url": "https://www.businesswire.com/news/home/20250416843598/en/JEDEC-and-Industry-Leaders-Collaborate-to-Release-JESD270-4-HBM4-Standard-Advancing-Bandwidth-Efficiency-and-Capacity-for-AI-and-HPC"
     },
     "synopsys_hbm_vip": {
-      "title": "HBM Verification IP \u2014 JESD270-4 rev 1.0",
+      "title": "HBM Verification IP — JESD270-4 rev 1.0",
       "publisher": "Synopsys",
       "url": "https://www.synopsys.com/verification/verification-ip/memory/hbm-verificationip.html"
     },
@@ -705,6 +705,16 @@
       "unit": "mixed; values name their units",
       "grade": "exploratory_assumption",
       "notes": "The p16 Table3 example is 512GiB/16dies/16banks per channel. One die per channel, block geometry and topology capacity are explicit product/composition choices within grade limits. Miniquick scales block count to 50GiB, not a shipping SKU.",
+      "source": "ocp_hbf_v070"
+    },
+    {
+      "config_keys": [
+        "hbf-address-layout"
+      ],
+      "profile_value": "bank-major (model default); ocp-v070 follows the published bit order",
+      "unit": "enum: bank-major | ocp-v070",
+      "grade": "standard_published",
+      "notes": "p22 section 4.6 puts the bank in the first four bits of the local page index and the die in the next two, and p63 section 5.7 reproduces the same order in its replay algebra (bank/die are the low bits of the block-relative index). The layout decides how a sequential stream spreads over the array, so both are published as an explicit choice: bank-major keeps one contiguous capacity range per bank, ocp-v070 rotates pages over every bank and die inside a block.",
       "source": "ocp_hbf_v070"
     },
     {

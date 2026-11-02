@@ -95,6 +95,7 @@ OCP timings.
 | `overlays/hbf/mapping/page-cache.cfg`, `entry-cache.cfg`, `compressed-cache.cfg` | Translation-page, DFTL-style entry, and compressed-run caches over the page-level L2P |
 | `overlays/hbf/mapping/block.cfg`, `block-log-striped.cfg`, `extent-striped.cfg` | Block, hybrid block-log and extent organizations; the striped ones set `hbf-mapping-superblock-planes=all` |
 | `overlays/hbf/cached-l2p-1-over-1000.cfg` | Controller DRAM budget of 1/1000 of HBF capacity for cached mapping |
+| `overlays/hbf/address-layout-ocp-v070.cfg` | Channel-local address layout from OCP section 4.6 / 5.7: bank in the low four bits, die next, so a sequential stream rotates over every bank and die (default `bank-major` keeps one contiguous range per bank) |
 | `overlays/hbf/external-direct-lane.cfg` | A direct per-stack lane between each HBF base die and the external backing device |
 | `overlays/hbf/endurance-regime-scaled.cfg` | A 4 MiB raw HBF so GC and wear leveling run within seconds of simulated time |
 | `overlays/hbf/thermal-boundary-55c.cfg`, `65c`, `70c` | Declared package boundary temperatures for the RC thermal model (not combinable with the package network, which derives the boundary) |
@@ -184,6 +185,7 @@ sweep must satisfy the channel/die maximum of every selected Grade.
 - [overlays/hbf/mapping/extent-striped.cfg](overlays/hbf/mapping/extent-striped.cfg)
 - [overlays/hbf/mapping/page-cache.cfg](overlays/hbf/mapping/page-cache.cfg)
 - [overlays/hbf/mapping/resident.cfg](overlays/hbf/mapping/resident.cfg)
+- [overlays/hbf/address-layout-ocp-v070.cfg](overlays/hbf/address-layout-ocp-v070.cfg)
 - [overlays/hbf/ocp-v070-grade1.cfg](overlays/hbf/ocp-v070-grade1.cfg)
 - [overlays/hbf/ocp-v070-grade2.cfg](overlays/hbf/ocp-v070-grade2.cfg)
 - [overlays/hbf/ocp-v070-grade3.cfg](overlays/hbf/ocp-v070-grade3.cfg)

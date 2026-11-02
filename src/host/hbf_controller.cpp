@@ -1,4 +1,5 @@
 #include "host/hbf_controller.hpp"
+#include "physical/hbf/hbf_address_layout.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -1477,18 +1478,14 @@ HbfAddress HbfController::decode(std::uint64_t addr) const {
     }
     HbfAddress decoded;
     decoded.offset = addr % config_.device.page_size_bytes;
-    std::uint64_t unit = addr / config_.device.page_size_bytes;
-    decoded.page = static_cast<std::uint32_t>(unit % config_.device.pages_per_block);
-    unit /= config_.device.pages_per_block;
-    decoded.block = static_cast<std::uint32_t>(unit % config_.device.blocks_per_plane);
-    unit /= config_.device.blocks_per_plane;
-    decoded.plane = static_cast<std::uint32_t>(unit % config_.device.planes_per_die);
-    unit /= config_.device.planes_per_die;
-    decoded.die = static_cast<std::uint32_t>(unit % config_.device.dies_per_channel);
-    unit /= config_.device.dies_per_channel;
-    decoded.channel = static_cast<std::uint32_t>(unit % config_.device.channels_per_stack);
-    unit /= config_.device.channels_per_stack;
-    decoded.stack = static_cast<std::uint32_t>(unit % config_.device.stacks);
+    const auto page = physical::hbf::decode_page_index(
+        config_.device.address_layout, config_.device, addr / config_.device.page_size_bytes);
+    decoded.stack = page.stack;
+    decoded.channel = page.channel;
+    decoded.die = page.die;
+    decoded.plane = page.plane;
+    decoded.block = page.block;
+    decoded.page = page.page;
     return decoded;
 }
 
@@ -1618,7 +1615,7 @@ std::optional<std::uint64_t> HbfController::visible_lpn_at(
     if (const auto base = lpn_to_ppn_.find(lpn); base != lpn_to_ppn_.end()) {
         const auto page = programmed_pages_.find(base->second);
         const auto block_index = static_cast<std::size_t>(
-            base->second / config_.device.pages_per_block);
+            block_index_for_ppn(base->second));
         const auto& block = blocks_.at(block_index);
         if (page != programmed_pages_.end() &&
             page->second.status == PageStatus::Valid &&
@@ -1638,7 +1635,7 @@ std::optional<std::uint64_t> HbfController::visible_lpn_at(
     const PendingMappingUpdate* newest = nullptr;
     for (const auto& update : pending->second) {
         const auto block_index = static_cast<std::size_t>(
-            update.new_ppn / config_.device.pages_per_block);
+            block_index_for_ppn(update.new_ppn));
         if (blocks_.at(block_index).epoch == update.block_epoch &&
             !blocks_.at(block_index).erase_pending &&
             update.commit_ns <= at_ns &&
@@ -1681,7 +1678,7 @@ void HbfController::wait_for_prior_lpn_commit(
             commit_sequences.insert(update.program_commit_sequence);
             commit_sequences.insert(update.sequence);
             const auto block_index = static_cast<std::size_t>(
-                update.new_ppn / config_.device.pages_per_block);
+                block_index_for_ppn(update.new_ppn));
             add_pending_block_transition_commits(
                 block_index, commit_sequences);
         }
@@ -1730,7 +1727,7 @@ void HbfController::wait_for_pending_vpn_erase(
             commit_sequences.insert(update.program_commit_sequence);
             commit_sequences.insert(update.sequence);
             const auto block_index = static_cast<std::size_t>(
-                update.new_ppn / config_.device.pages_per_block);
+                block_index_for_ppn(update.new_ppn));
             add_pending_block_transition_commits(
                 block_index, commit_sequences);
         }
@@ -1772,7 +1769,7 @@ bool HbfController::current_ppn_has_pending_transition(
         return false;
     }
     const auto block_index = static_cast<std::size_t>(
-        *current / config_.device.pages_per_block);
+        block_index_for_ppn(*current));
     return blocks_.at(block_index).erase_pending ||
         pending_block_transitions_.contains(block_index);
 }
@@ -1786,7 +1783,7 @@ void HbfController::wait_for_pending_block_erase(
     // a GC reclaim is issued after every live page has been published
     // elsewhere and is never waited for here.
     const auto block_index = static_cast<std::size_t>(
-        ppn / config_.device.pages_per_block);
+        block_index_for_ppn(ppn));
     if (!blocks_.at(block_index).erase_pending) {
         return;
     }
@@ -1842,7 +1839,7 @@ void HbfController::tag_pending_mapping_updates_for_erase(
     const auto tag = [this, block_index, retired_block_epoch, ready_ns](auto& table) {
         for (auto& [_, updates] : table) {
             for (auto& update : updates) {
-                if (update.new_ppn / config_.device.pages_per_block == block_index &&
+                if (block_index_for_ppn(update.new_ppn) == block_index &&
                     update.block_epoch == retired_block_epoch) {
                     update.destructive_ready_ns = std::max(
                         update.destructive_ready_ns, ready_ns);
@@ -1864,14 +1861,14 @@ void HbfController::retire_mapping_update_tombstones(
                 entry->second.begin(),
                 entry->second.end(),
                 [this, block_index, ready_ns](const PendingMappingUpdate& update) {
-                    return update.new_ppn / config_.device.pages_per_block == block_index &&
+                    return block_index_for_ppn(update.new_ppn) == block_index &&
                         update.destructive_ready_ns != 0.0 &&
                         update.destructive_ready_ns <= ready_ns &&
                         update.commit_ns <= ready_ns;
                 });
             std::erase_if(entry->second, [this, block_index, ready_ns](
                               const PendingMappingUpdate& update) {
-                return update.new_ppn / config_.device.pages_per_block == block_index &&
+                return block_index_for_ppn(update.new_ppn) == block_index &&
                     update.destructive_ready_ns != 0.0 &&
                     update.destructive_ready_ns <= ready_ns &&
                     update.commit_ns <= ready_ns;
@@ -1899,7 +1896,7 @@ std::optional<std::uint64_t> HbfController::visible_mapping_vpn_at(
         base != mapping_vpn_to_ppn_.end()) {
         const auto page = programmed_pages_.find(base->second);
         const auto block_index = static_cast<std::size_t>(
-            base->second / config_.device.pages_per_block);
+            block_index_for_ppn(base->second));
         const auto& block = blocks_.at(block_index);
         if (page != programmed_pages_.end() &&
             page->second.status == PageStatus::Valid &&
@@ -1919,7 +1916,7 @@ std::optional<std::uint64_t> HbfController::visible_mapping_vpn_at(
     const PendingMappingUpdate* newest = nullptr;
     for (const auto& update : pending->second) {
         const auto block_index = static_cast<std::size_t>(
-            update.new_ppn / config_.device.pages_per_block);
+            block_index_for_ppn(update.new_ppn));
         if (blocks_.at(block_index).epoch == update.block_epoch &&
             !blocks_.at(block_index).erase_pending &&
             update.commit_ns <= at_ns &&
@@ -1939,7 +1936,7 @@ void HbfController::schedule_lpn_mapping_commit(
     std::optional<std::uint64_t> expected_old_ppn) {
     const auto sequence = next_commit_sequence_++;
     const auto block_index = static_cast<std::size_t>(
-        new_ppn / config_.device.pages_per_block);
+        block_index_for_ppn(new_ppn));
     const auto block_epoch = blocks_.at(block_index).epoch;
     blocks_.at(block_index).pending_mapping_publications++;
     pending_lpn_updates_[lpn].push_back(PendingMappingUpdate{
@@ -2023,7 +2020,7 @@ void HbfController::schedule_vpn_mapping_commit(
     std::optional<std::uint64_t> expected_old_ppn) {
     const auto sequence = next_commit_sequence_++;
     const auto block_index = static_cast<std::size_t>(
-        new_ppn / config_.device.pages_per_block);
+        block_index_for_ppn(new_ppn));
     const auto block_epoch = blocks_.at(block_index).epoch;
     blocks_.at(block_index).pending_mapping_publications++;
     pending_vpn_updates_[mapping_vpn].push_back(PendingMappingUpdate{
@@ -2105,7 +2102,7 @@ std::uint64_t HbfController::schedule_media_program_commit(
     PageOwner owner,
     double commit_ns) {
     const auto block_index = static_cast<std::size_t>(
-        ppn / config_.device.pages_per_block);
+        block_index_for_ppn(ppn));
     const auto block_epoch = blocks_.at(block_index).epoch;
     const auto page = programmed_pages_.find(ppn);
     if (page == programmed_pages_.end() ||
@@ -2150,7 +2147,7 @@ void HbfController::schedule_physical_program_commit(
     }
     try {
         const auto block_index = static_cast<std::size_t>(
-            ppn / config_.device.pages_per_block);
+            block_index_for_ppn(ppn));
         const auto block_epoch = blocks_.at(block_index).epoch;
         pending->second.commit_sequence = schedule_commit(
             stack_of_block(block_index), commit_ns,
@@ -2196,9 +2193,9 @@ void HbfController::reserve_physical_program_range(
     for (std::uint64_t i = 0; i < pages; ++i) {
         const auto ppn = first_ppn + i;
         const auto block_index = static_cast<std::size_t>(
-            ppn / config_.device.pages_per_block);
+            block_index_for_ppn(ppn));
         const auto page_index = static_cast<std::uint32_t>(
-            ppn % config_.device.pages_per_block);
+            page_in_block_for_ppn(ppn));
         const auto& block = blocks_.at(block_index);
         if (block.role != BlockRole::Free && block.role != BlockRole::RawPhysical) {
             throw std::runtime_error(
@@ -2247,7 +2244,7 @@ void HbfController::reserve_physical_program_range(
     for (std::uint64_t i = 0; i < pages; ++i) {
         const auto ppn = first_ppn + i;
         const auto block_index = static_cast<std::size_t>(
-            ppn / config_.device.pages_per_block);
+            block_index_for_ppn(ppn));
         auto& block = blocks_.at(block_index);
         if (block.role == BlockRole::Free) {
             auto& free_blocks = planes_.at(block_plane_index(block_index)).free_blocks;
@@ -2804,7 +2801,7 @@ void HbfController::reserve_static_physical_pages(
         }
         if (unique_pages.insert(ppn).second) {
             touched_blocks.push_back(
-                static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+                static_cast<std::size_t>(block_index_for_ppn(ppn)));
         }
     }
     // Page conflicts must be checked before the block helper mutates any
@@ -2825,10 +2822,10 @@ void HbfController::reserve_static_physical_pages(
             page.status = PageStatus::StaticReadOnly;
             page.owner = PageOwner::StaticReadOnly;
             page.lpn = ppn;
-            auto& block = blocks_.at(static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+            auto& block = blocks_.at(static_cast<std::size_t>(block_index_for_ppn(ppn)));
             page.block_epoch = block.epoch;
             block.valid_pages++;
-            block.set_valid(static_cast<std::uint32_t>(ppn % config_.device.pages_per_block), config_.device.pages_per_block);
+            block.set_valid(static_cast<std::uint32_t>(page_in_block_for_ppn(ppn)), config_.device.pages_per_block);
         }
     }
     stats_.free_pages = free_pages_;
@@ -3542,9 +3539,9 @@ void HbfController::restore_persistent_image(const HbfPersistentImage& image) {
         }
         const auto owner = page_owner(source.owner);
         const auto block_index = static_cast<std::size_t>(
-            source.ppn / config_.device.pages_per_block);
+            block_index_for_ppn(source.ppn));
         const auto page_index = static_cast<std::uint32_t>(
-            source.ppn % config_.device.pages_per_block);
+            page_in_block_for_ppn(source.ppn));
         if (source.block_epoch != blocks_[block_index].epoch ||
             !programmed_pages_.emplace(
                 source.ppn,
@@ -3864,7 +3861,7 @@ void HbfController::restore_persistent_image(const HbfPersistentImage& image) {
         compact.retired_lpns.for_each([&](std::uint64_t lpn) {
             const auto ppn = compact_ppn_without_validity(lpn);
             auto& count = retired_data_pages_by_block[
-                ppn / config_.device.pages_per_block];
+                block_index_for_ppn(ppn)];
             if (count == std::numeric_limits<std::uint32_t>::max()) {
                 throw std::runtime_error(
                     "HBF restored compact retired-page count overflowed");
@@ -3897,9 +3894,9 @@ void HbfController::restore_persistent_image(const HbfPersistentImage& image) {
         compact.retired_lpns.for_each([&](std::uint64_t lpn) {
             const auto ppn = compact_ppn_without_validity(lpn);
             blocks_[static_cast<std::size_t>(
-                ppn / config_.device.pages_per_block)].clear_valid(
+                block_index_for_ppn(ppn))].clear_valid(
                     static_cast<std::uint32_t>(
-                        ppn % config_.device.pages_per_block));
+                        page_in_block_for_ppn(ppn)));
         });
         for (std::size_t offset = 0;
              offset < compact.mapping_ppns.size();
@@ -3916,9 +3913,9 @@ void HbfController::restore_persistent_image(const HbfPersistentImage& image) {
             }
             const auto ppn = *compact.mapping_ppns[offset];
             blocks_[static_cast<std::size_t>(
-                ppn / config_.device.pages_per_block)].set_valid(
+                block_index_for_ppn(ppn))].set_valid(
                     static_cast<std::uint32_t>(
-                        ppn % config_.device.pages_per_block), config_.device.pages_per_block);
+                        page_in_block_for_ppn(ppn)), config_.device.pages_per_block);
         }
         compact_logical_image_ = std::move(compact);
         source.retired_lpns.for_each_ordered([&](std::uint64_t lpn) {
@@ -3931,9 +3928,9 @@ void HbfController::restore_persistent_image(const HbfPersistentImage& image) {
             if (page.status == PageStatus::Valid ||
                 page.status == PageStatus::StaticReadOnly) {
                 blocks_[static_cast<std::size_t>(
-                    ppn / config_.device.pages_per_block)].set_valid(
+                    block_index_for_ppn(ppn))].set_valid(
                         static_cast<std::uint32_t>(
-                            ppn % config_.device.pages_per_block), config_.device.pages_per_block);
+                            page_in_block_for_ppn(ppn)), config_.device.pages_per_block);
             }
         }
     }
@@ -4123,8 +4120,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
             first_source_page, source_pages);
         for (const auto& span : spans) {
             const auto plane_base = span.plane * config_.device.blocks_per_plane;
-            const auto first_block = span.first_page /
-                config_.device.pages_per_block;
+            const auto first_block = block_index_for_ppn(span.first_page);
             const auto last_block =
                 (span.first_page + span.page_count - 1) /
                 config_.device.pages_per_block;
@@ -4224,8 +4220,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                             source_erase.destination_ppns.begin(),
                             source_erase.destination_ppns.end(),
                             [this, block](std::uint64_t destination_ppn) {
-                                return destination_ppn /
-                                        config_.device.pages_per_block == block;
+                                return block_index_for_ppn(destination_ppn) == block;
                             })) {
                         continue;
                     }
@@ -4244,7 +4239,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
             for (std::uint64_t i = 0; i < pages; ++i) {
                 const auto ppn = first_ppn + i;
                 const auto stack = stack_of_block(static_cast<std::size_t>(
-                    ppn / config_.device.pages_per_block));
+                    block_index_for_ppn(ppn)));
                 if (const auto observed = materialized_ready_by_ppn_.find(ppn);
                     observed != materialized_ready_by_ppn_.end()) {
                     state_ready_by_stack[stack] = std::max(
@@ -4631,7 +4626,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                 for (std::uint64_t i = 0; i < pages; ++i) {
                     const auto stack = physical_request ?
                         stack_of_block(static_cast<std::size_t>(
-                            (first_ppn + i) / config_.device.pages_per_block)) :
+                            block_index_for_ppn(first_ppn + i))) :
                         stack_for_lpn(first_lpn + i);
                     thermal_pages_by_stack.at(stack)++;
                 }
@@ -4721,7 +4716,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                     const InflightBufferedWrite* newest = nullptr;
                     for (const auto& generation : inflight->second) {
                         const auto target_block = static_cast<std::size_t>(
-                            generation.target_ppn / config_.device.pages_per_block);
+                            block_index_for_ppn(generation.target_ppn));
                         const auto& block = blocks_.at(target_block);
                         if (block.epoch == generation.target_block_epoch &&
                             !block.erase_pending &&
@@ -4945,8 +4940,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                 continue;
             }
             double decoded_ready_ns = 0.0;
-            const auto bank = static_cast<std::size_t>(*ppn /
-                config_.device.pages_per_block / config_.device.blocks_per_plane);
+            const auto bank = static_cast<std::size_t>(block_index_for_ppn(*ppn) / config_.device.blocks_per_plane);
             const auto& full_plane_windows = planes_[bank].full_plane_windows;
             // Completed program/erase windows are retained until an amortized
             // cleanup. Their presence must not permanently disable grouping.
@@ -5691,11 +5685,11 @@ void HbfController::record_plane_media_busy(
 }
 
 bool HbfController::read_buffer_contains(std::uint64_t ppn, double at_ns) {
-    const auto& block = blocks_.at(ppn / config_.device.pages_per_block);
+    const auto& block = blocks_.at(block_index_for_ppn(ppn));
     return !block.erase_pending && media_->cache_hit(ppn, at_ns);
 }
 void HbfController::read_buffer_insert(std::uint64_t ppn, double ready_ns) {
-    if (!blocks_.at(ppn / config_.device.pages_per_block).erase_pending)
+    if (!blocks_.at(block_index_for_ppn(ppn)).erase_pending)
         media_->cache_fill(ppn, ready_ns);
 }
 void HbfController::read_buffer_purge_page(std::uint64_t ppn) { media_->cache_purge_page(ppn); }
@@ -5705,7 +5699,7 @@ std::optional<double> HbfController::try_serve_pending_read(
     std::uint64_t ppn, std::uint64_t bytes, double earliest_ns,
     Breakdown& breakdown, std::vector<TraceSpan>* spans) {
     if (!config_.host.read_buffer_coalescing_enabled ||
-        blocks_.at(ppn / config_.device.pages_per_block).erase_pending) return std::nullopt;
+        blocks_.at(block_index_for_ppn(ppn)).erase_pending) return std::nullopt;
     const auto ready = media_->pending_cache_fill(ppn, earliest_ns);
     if (!ready) return std::nullopt;
     const auto addr = decode_ppn(ppn);
@@ -5888,7 +5882,7 @@ double HbfController::serve_read_from_read_buffer(
     std::vector<TraceSpan>* spans, bool host_buffer,
     std::optional<double> pending_ready_ns) {
     const auto stack = static_cast<std::uint32_t>(stack_of_block(
-        static_cast<std::size_t>(ppn / config_.device.pages_per_block)));
+        static_cast<std::size_t>(block_index_for_ppn(ppn))));
     auto& logic_die = logic_dies_.at(stack);
     if (!mapping_is_local())
         earliest_ns = schedule_external_request_command(channel_index(decode_ppn(ppn)),
@@ -5933,8 +5927,8 @@ double HbfController::serve_read_from_read_buffer(
         spans,
         "read_buffer_hit_hbio_out",
         "read-buffer hit");
-    blocks_.at(ppn / config_.device.pages_per_block).issued_media_ready_ns = std::max(
-        blocks_.at(ppn / config_.device.pages_per_block).issued_media_ready_ns, response);
+    blocks_.at(block_index_for_ppn(ppn)).issued_media_ready_ns = std::max(
+        blocks_.at(block_index_for_ppn(ppn)).issued_media_ready_ns, response);
     return host_buffer ? host_memory_transfer(stack, bytes, Op::Write,
         response, breakdown, spans) : response;
 }
@@ -5967,7 +5961,7 @@ double HbfController::device_dram_transfer(std::size_t stack, std::uint64_t byte
 }
 
 std::optional<double> HbfController::device_dram_probe(std::uint64_t ppn) {
-    const auto stack = stack_of_block(static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+    const auto stack = stack_of_block(static_cast<std::size_t>(block_index_for_ppn(ppn)));
     auto& lines = device_dram_by_stack_.at(stack);
     const auto ready = lines.ready(ppn);
     if (!ready) {
@@ -5980,7 +5974,7 @@ std::optional<double> HbfController::device_dram_probe(std::uint64_t ppn) {
 }
 
 std::optional<double> HbfController::device_dram_cached(std::uint64_t ppn) const {
-    const auto stack = stack_of_block(static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+    const auto stack = stack_of_block(static_cast<std::size_t>(block_index_for_ppn(ppn)));
     return device_dram_by_stack_.at(stack).ready(ppn);
 }
 
@@ -6008,7 +6002,7 @@ double HbfController::device_dram_serve_hit(std::uint64_t ppn, std::uint64_t byt
 
 void HbfController::device_dram_fill(std::uint64_t ppn, double data_ready_ns,
     std::vector<TraceSpan>* spans) {
-    const auto block = static_cast<std::size_t>(ppn / config_.device.pages_per_block);
+    const auto block = static_cast<std::size_t>(block_index_for_ppn(ppn));
     const auto stack = stack_of_block(block);
     // A block already scheduled for erase must not regain cached lines, and a
     // page that is already cached needs no second copy.
@@ -6050,7 +6044,7 @@ void HbfController::device_dram_fill(std::uint64_t ppn, double data_ready_ns,
 }
 
 void HbfController::device_dram_install(std::uint64_t ppn, double ready_ns) {
-    const auto block = static_cast<std::size_t>(ppn / config_.device.pages_per_block);
+    const auto block = static_cast<std::size_t>(block_index_for_ppn(ppn));
     const auto stack = stack_of_block(block);
     // A block already scheduled for erase must not regain cached lines.
     if (blocks_.at(block).erase_pending) return;
@@ -6101,7 +6095,7 @@ void HbfController::device_dram_release_policy_page(std::size_t stack) {
 
 void HbfController::device_dram_purge_page(std::uint64_t ppn) {
     if (!device_dram_enabled()) return;
-    const auto stack = stack_of_block(static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+    const auto stack = stack_of_block(static_cast<std::size_t>(block_index_for_ppn(ppn)));
     device_dram_by_stack_.at(stack).erase(ppn);
 }
 
@@ -6216,6 +6210,32 @@ std::size_t HbfController::block_index(const HbfAddress& addr) const {
     return index;
 }
 
+std::size_t HbfController::block_index_for_ppn(std::uint64_t ppn) const {
+    return block_index(decode_ppn(ppn));
+}
+
+std::uint32_t HbfController::page_in_block_for_ppn(std::uint64_t ppn) const {
+    return decode_ppn(ppn).page;
+}
+
+std::uint64_t HbfController::ppn_for_block_page(std::size_t block_index_value,
+                                                std::uint32_t page) const {
+    const auto per_plane = static_cast<std::size_t>(config_.device.blocks_per_plane);
+    HbfAddress address{};
+    address.block = static_cast<std::uint32_t>(block_index_value % per_plane);
+    auto rest = block_index_value / per_plane;
+    address.plane = static_cast<std::uint32_t>(rest % config_.device.planes_per_die);
+    rest /= config_.device.planes_per_die;
+    address.die = static_cast<std::uint32_t>(rest % config_.device.dies_per_channel);
+    rest /= config_.device.dies_per_channel;
+    address.channel = static_cast<std::uint32_t>(rest % config_.device.channels_per_stack);
+    rest /= config_.device.channels_per_stack;
+    address.stack = static_cast<std::uint32_t>(rest);
+    address.page = page;
+    address.offset = 0;
+    return encode_ppn(address);
+}
+
 std::size_t HbfController::block_plane_index(std::size_t block_index) const {
     return block_index / config_.device.blocks_per_plane;
 }
@@ -6263,13 +6283,14 @@ std::uint64_t HbfController::encode_ppn(const HbfAddress& addr) const {
         addr.offset >= config_.device.page_size_bytes) {
         throw std::runtime_error("HBF address field out of range");
     }
-    std::uint64_t unit = addr.stack;
-    unit = unit * config_.device.channels_per_stack + addr.channel;
-    unit = unit * config_.device.dies_per_channel + addr.die;
-    unit = unit * config_.device.planes_per_die + addr.plane;
-    unit = unit * config_.device.blocks_per_plane + addr.block;
-    unit = unit * config_.device.pages_per_block + addr.page;
-    return unit;
+    physical::hbf::PageCoordinates page{};
+    page.stack = addr.stack;
+    page.channel = addr.channel;
+    page.die = addr.die;
+    page.plane = addr.plane;
+    page.block = addr.block;
+    page.page = addr.page;
+    return physical::hbf::encode_page_index(config_.device.address_layout, config_.device, page);
 }
 
 HbfAddress HbfController::logical_page_address(std::uint64_t logical_byte_addr) const {
@@ -6339,6 +6360,9 @@ HbfController::CompactReadAddress HbfController::compact_data_address(
     const auto plane = position.stack * planes_per_stack() +
         stack_local_plane(position.data_index);
     const auto page_ordinal = position.data_index / pps;
+    // page_ordinal is a stack-local, plane-striped ordinal, not a physical page
+    // number: it advances one page per plane before the block changes. Only the
+    // final (block, page) pair is encoded through the address layout.
     const auto block_ordinal = page_ordinal / config_.device.pages_per_block;
     const auto page = static_cast<std::uint32_t>(
         page_ordinal % config_.device.pages_per_block);
@@ -6349,7 +6373,7 @@ HbfController::CompactReadAddress HbfController::compact_data_address(
     }
     const auto block_index = assigned_blocks[block_ordinal];
     return CompactReadAddress{
-        .ppn = block_index * config_.device.pages_per_block + page,
+        .ppn = ppn_for_block_page(block_index, page),
         .mapping_vpn = position.mapping_vpn,
         .stack = position.stack,
         .block_index = static_cast<std::size_t>(block_index),
@@ -6453,9 +6477,9 @@ std::optional<std::uint64_t> HbfController::compact_mapping_ppn(
     }
     const auto ppn = *compact_ppn;
     const auto block_index = static_cast<std::size_t>(
-        ppn / config_.device.pages_per_block);
+        block_index_for_ppn(ppn));
     const auto page = static_cast<std::uint32_t>(
-        ppn % config_.device.pages_per_block);
+        page_in_block_for_ppn(ppn));
     const auto& block = blocks_.at(block_index);
     if (block.role != BlockRole::Mapping || block.erase_pending ||
         !block.is_valid(page)) {
@@ -6471,7 +6495,7 @@ std::optional<std::uint64_t> HbfController::compact_lpn_for_ppn(
         return std::nullopt;
     }
     const auto& image = *compact_logical_image_;
-    const auto block_index = ppn / config_.device.pages_per_block;
+    const auto block_index = block_index_for_ppn(ppn);
     const auto location = image.data_block_locations.find(block_index);
     if (location == image.data_block_locations.end()) {
         return std::nullopt;
@@ -6483,7 +6507,7 @@ std::optional<std::uint64_t> HbfController::compact_lpn_for_ppn(
             location->second.block_ordinal,
             config_.device.pages_per_block,
             "HBF compact inverse block ordinal"),
-        ppn % config_.device.pages_per_block,
+        page_in_block_for_ppn(ppn),
         "HBF compact inverse page ordinal");
     const auto data_index =
         stack_local_index(plane - stack * planes_per_stack(), page_ordinal);
@@ -6610,7 +6634,7 @@ void HbfController::retire_compact_page(
             "HBF compact retirement requires logical or mapping ownership");
     }
 
-    const auto block_index = *ppn / config_.device.pages_per_block;
+    const auto block_index = block_index_for_ppn(*ppn);
     auto live = live_pages->find(block_index);
     if (live == live_pages->end() || live->second == 0) {
         throw std::runtime_error(
@@ -6639,7 +6663,7 @@ std::uint64_t HbfController::logical_mapping_entry_count() const {
         const bool has_live_update = std::any_of(
             updates.begin(), updates.end(), [this](const PendingMappingUpdate& update) {
                 const auto block_index = static_cast<std::size_t>(
-                    update.new_ppn / config_.device.pages_per_block);
+                    block_index_for_ppn(update.new_ppn));
                 return blocks_.at(block_index).epoch == update.block_epoch &&
                     !blocks_.at(block_index).erase_pending;
             });
@@ -7268,7 +7292,7 @@ HbfController::MappingScratchPage* HbfController::read_mapping_backing_page(
         wait_for_pending_block_erase(
             *backing_ppn, at_ns, breakdown, spans);
         if (pending_block_transitions_.contains(static_cast<std::size_t>(
-                *backing_ppn / config_.device.pages_per_block))) {
+                block_index_for_ppn(*backing_ppn)))) {
             // The persisted copy sits in a block whose GC reclaim is already
             // issued, so its relocation is published: wait for that
             // publication and read the relocated copy.
@@ -8501,12 +8525,12 @@ void HbfController::flush_write_buffer_entry(
         // the page never holds a slot and a line at once. The program has
         // materialized by then; a page retired before that (TRIM, erase)
         // is not cached.
-        const auto block = static_cast<std::size_t>(new_ppn / config_.device.pages_per_block);
+        const auto block = static_cast<std::size_t>(block_index_for_ppn(new_ppn));
         const auto epoch = blocks_.at(block).epoch;
         (void)schedule_commit(stack, page_done, [this, new_ppn, block, epoch, page_done]() {
             const auto& state = blocks_.at(block);
             if (state.epoch != epoch ||
-                !state.is_valid(static_cast<std::uint32_t>(new_ppn % config_.device.pages_per_block)))
+                !state.is_valid(static_cast<std::uint32_t>(page_in_block_for_ppn(new_ppn))))
                 return;
             device_dram_install(new_ppn, page_done);
         });
@@ -8522,7 +8546,7 @@ void HbfController::flush_write_buffer_entry(
         .commit_ns = page_done,
         .target_ppn = new_ppn,
         .target_block_epoch = blocks_.at(
-            static_cast<std::size_t>(new_ppn / config_.device.pages_per_block)).epoch,
+            static_cast<std::size_t>(block_index_for_ppn(new_ppn))).epoch,
     });
     (void)schedule_commit(stack, page_done, [this, lpn, generation]() {
         const auto found_inflight = inflight_buffered_writes_.find(lpn);
@@ -8810,7 +8834,7 @@ std::uint64_t HbfController::allocate_page_from_block(std::size_t block_index) {
     block.pending_program_pages++;
     free_pages_--;
     free_pages_per_stack_.at(stack_of_block(block_index))--;
-    const auto ppn = static_cast<std::uint64_t>(block_index) * config_.device.pages_per_block + page;
+    const auto ppn = ppn_for_block_page(block_index, page);
     const auto inserted = programmed_pages_.emplace(ppn, PageState{});
     if (!inserted.second && inserted.first->second.status != PageStatus::Erased) {
         throw std::runtime_error("HBF allocator selected a programmed physical page");
@@ -8865,9 +8889,7 @@ std::uint64_t HbfController::allocate_compact_pages_on_plane(
         }
         const auto take = std::min<std::uint32_t>(remaining, block.free_pages);
         const auto first_page = block.next_page;
-        const auto ppn =
-            static_cast<std::uint64_t>(*active) * config_.device.pages_per_block +
-            first_page;
+        const auto ppn = ppn_for_block_page(*active, first_page);
         if (!first_ppn) {
             first_ppn = ppn;
         }
@@ -8909,8 +8931,8 @@ void HbfController::invalidate_ppn(std::uint64_t ppn) {
 
 void HbfController::invalidate_live_page(std::uint64_t ppn) {
     ++read_mshr_epoch_;
-    auto& block = blocks_.at(ppn / config_.device.pages_per_block);
-    const auto page = static_cast<std::uint32_t>(ppn % config_.device.pages_per_block);
+    auto& block = blocks_.at(block_index_for_ppn(ppn));
+    const auto page = static_cast<std::uint32_t>(page_in_block_for_ppn(ppn));
     if (block.valid_pages == 0 || !block.is_valid(page)) {
         // A valid page always counts in its block; an underflow here means
         // the page table and the block counters disagree, which the audit
@@ -8925,7 +8947,7 @@ void HbfController::invalidate_live_page(std::uint64_t ppn) {
     // and relocation all retire its device-DRAM line here.
     device_dram_purge_page(ppn);
     block.invalid_pages++;
-    mark_gc_candidate_dirty(static_cast<std::size_t>(ppn / config_.device.pages_per_block));
+    mark_gc_candidate_dirty(static_cast<std::size_t>(block_index_for_ppn(ppn)));
     stats_.invalidations++;
 }
 
@@ -8936,8 +8958,8 @@ void HbfController::mark_programmed(
     if (ppn >= total_pages_) {
         throw std::runtime_error("HBF program target PPN is out of range");
     }
-    const auto block_index = static_cast<std::size_t>(ppn / config_.device.pages_per_block);
-    const auto page_index = static_cast<std::uint32_t>(ppn % config_.device.pages_per_block);
+    const auto block_index = static_cast<std::size_t>(block_index_for_ppn(ppn));
+    const auto page_index = static_cast<std::uint32_t>(page_in_block_for_ppn(ppn));
     auto& block = blocks_.at(block_index);
     auto page_state = programmed_pages_.find(ppn);
     if (page_state == programmed_pages_.end()) {
@@ -10110,7 +10132,7 @@ double HbfController::schedule_read_page(
                 std::to_string(buffer_bank_index));
     }
     auto& block = blocks_.at(static_cast<std::size_t>(
-        ppn / config_.device.pages_per_block));
+        block_index_for_ppn(ppn)));
     block.issued_media_ready_ns = std::max(
         block.issued_media_ready_ns, page_buffer.finish_ns);
 
@@ -10240,7 +10262,7 @@ double HbfController::schedule_program_page(
     auto erase_ready = command_received;
     if (auto_erase) {
         ++stats_.auto_erase_requests;
-        erase_ready = schedule_erase_block(ppn / config_.device.pages_per_block,
+        erase_ready = schedule_erase_block(block_index_for_ppn(ppn),
             command_received, breakdown, spans, source, heatmap_attribution, true);
     }
     // Mapping checkpoints and GC copies source the reserved HBM buffer.
@@ -10418,7 +10440,7 @@ double HbfController::schedule_buffered_program_page(
     record_plane_media_busy(plane, media_start, program_done);
     plane.program_count++;
     auto& block = blocks_.at(static_cast<std::size_t>(
-        ppn / config_.device.pages_per_block));
+        block_index_for_ppn(ppn)));
     block.issued_media_ready_ns = std::max(
         block.issued_media_ready_ns, program_done);
     if (address_heatmap_ != nullptr) {
@@ -11062,9 +11084,9 @@ void HbfController::refresh_accounting_stats() const {
             throw std::runtime_error("HBF page-state table contains an out-of-range PPN");
         }
         const auto block_index = static_cast<std::size_t>(
-            ppn / config_.device.pages_per_block);
+            block_index_for_ppn(ppn));
         const auto page_index = static_cast<std::uint32_t>(
-            ppn % config_.device.pages_per_block);
+            page_in_block_for_ppn(ppn));
         const auto& block = blocks_.at(block_index);
         if (block.initial_raw_pages)
             throw std::runtime_error("materialized page overlaps compact raw initial block");
@@ -11192,9 +11214,9 @@ void HbfController::refresh_accounting_stats() const {
                     "HBF compact mapping-page directory is out of range");
             }
             const auto block_index = static_cast<std::size_t>(
-                ppn / config_.device.pages_per_block);
+                block_index_for_ppn(ppn));
             const auto page_index = static_cast<std::uint32_t>(
-                ppn % config_.device.pages_per_block);
+                page_in_block_for_ppn(ppn));
             const auto mapping_vpn = checked_add(
                 image.first_vpn,
                 index,

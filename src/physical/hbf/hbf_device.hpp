@@ -94,6 +94,16 @@ public:
 private:
     void validate_page(std::uint64_t ppn) const;
     void validate_block(std::uint64_t block) const;
+    // Canonical block slot: one entry of blocks_/physical_pec_, ordered
+    // plane-major. Under bank_major this equals ppn / pages_per_block; under
+    // ocp_v070 a channel block spans every die and bank, so the slot keeps the
+    // per-plane address book while the layout only changes page order.
+    [[nodiscard]] std::size_t block_slot(std::uint64_t ppn) const;
+    // Page slot inside that plane block (0..pages_per_block-1).
+    [[nodiscard]] std::uint32_t block_page_slot(std::uint64_t ppn) const;
+    // Physical page of a block slot's k-th page, in whatever order the layout
+    // places it. ocp_v070 strides these pages across banks and dies.
+    [[nodiscard]] std::uint64_t page_of_block_slot(std::size_t block_slot, std::uint32_t page) const;
     struct Block { std::uint32_t next_page = 0; };
     struct CacheEvent { std::uint64_t page; int action; /* -1 invalidate, 0 touch, 1 fill */ };
     struct CachePages {

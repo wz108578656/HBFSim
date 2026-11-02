@@ -2052,6 +2052,11 @@ private:
     [[nodiscard]] std::size_t die_index(const HbfAddress& addr) const;
     [[nodiscard]] std::size_t plane_index(const HbfAddress& addr) const;
     [[nodiscard]] std::size_t block_index(const HbfAddress& addr) const;
+    // Layout-agnostic inverses: the host FTL reasons in (block, page) but the
+    // address layout decides which physical page a pair names.
+    [[nodiscard]] std::size_t block_index_for_ppn(std::uint64_t ppn) const;
+    [[nodiscard]] std::uint32_t page_in_block_for_ppn(std::uint64_t ppn) const;
+    [[nodiscard]] std::uint64_t ppn_for_block_page(std::size_t block_index, std::uint32_t page) const;
     [[nodiscard]] std::size_t block_plane_index(std::size_t block_index) const;
     void reserve_static_physical_blocks(
         const std::vector<std::size_t>& block_indices);

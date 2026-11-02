@@ -1,4 +1,5 @@
 #include "physical/hbf/hbf_device.hpp"
+#include "physical/hbf/hbf_address_layout.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -38,12 +39,35 @@ void HbfDevice::validate_block(std::uint64_t block) const {
     if (block >= total_pages_ / config_.pages_per_block)
         throw std::out_of_range("HBF block outside device geometry");
 }
+std::size_t HbfDevice::block_slot(std::uint64_t ppn) const {
+    const auto page = decode_page_index(config_.address_layout, config_, ppn);
+    return global_plane_index(config_, page) * config_.blocks_per_plane + page.block;
+}
+std::uint32_t HbfDevice::block_page_slot(std::uint64_t ppn) const {
+    return decode_page_index(config_.address_layout, config_, ppn).page;
+}
+std::uint64_t HbfDevice::page_of_block_slot(std::size_t block_slot, std::uint32_t page) const {
+    const auto per_plane = static_cast<std::size_t>(config_.blocks_per_plane);
+    PageCoordinates coords{};
+    coords.block = static_cast<std::uint32_t>(block_slot % per_plane);
+    auto rest = block_slot / per_plane;
+    coords.plane = static_cast<std::uint32_t>(rest % config_.planes_per_die);
+    rest /= config_.planes_per_die;
+    coords.die = static_cast<std::uint32_t>(rest % config_.dies_per_channel);
+    rest /= config_.dies_per_channel;
+    coords.channel = static_cast<std::uint32_t>(rest % config_.channels_per_stack);
+    rest /= config_.channels_per_stack;
+    coords.stack = static_cast<std::uint32_t>(rest);
+    coords.page = page;
+    return encode_page_index(config_.address_layout, config_, coords);
+}
 std::size_t HbfDevice::bank_for_page(std::uint64_t ppn) const {
     validate_page(ppn);
-    return ppn / config_.pages_per_block / config_.blocks_per_plane;
+    return global_plane_index(config_, decode_page_index(config_.address_layout, config_, ppn));
 }
 std::size_t HbfDevice::channel_for_page(std::uint64_t ppn) const {
-    return bank_for_page(ppn) / config_.planes_per_die / config_.dies_per_channel;
+    validate_page(ppn);
+    return global_channel_index(config_, decode_page_index(config_.address_layout, config_, ppn));
 }
 HbfDevice::Transfer HbfDevice::transfer(std::size_t channel, Direction direction,
     std::uint64_t bytes, double arrival, double watermark) {
@@ -164,15 +188,15 @@ HbfDevice::WriteAdmission HbfDevice::receive_write_fragment(std::uint64_t ppn,
         if (found->second.programming) return {.status = 0x6, .additional_status = 0x1};
         if (found->second.coverage & mask) return {.status = 0x2};
     } else {
-        const auto block_index = ppn / config_.pages_per_block;
+        const auto block_index = block_slot(ppn);
         const auto next_page = blocks_[block_index].next_page;
-        const auto page = ppn % config_.pages_per_block;
+        const auto page = block_page_slot(ppn);
         if (page && page != next_page) return {.status = 0x6, .additional_status = 0x1};
         // A new page-zero cycle cannot retire in-flight pages of its block.
         if (!page)
             for (const auto& [active, write] : writes_) {
                 (void)write;
-                if (active / config_.pages_per_block == block_index)
+                if (block_slot(active) == block_index)
                     return {.status = 0x6, .additional_status = 0x1};
             }
         if (outstanding_writes_[channel] >= config_.outstanding_write_pages_per_channel)
@@ -226,23 +250,25 @@ bool HbfDevice::prepare_program(std::uint64_t ppn) {
         (pending->second.coverage != ~std::uint64_t{0} || pending->second.programming))
         throw std::logic_error("HBF program requires one complete, unprogrammed 4 KiB buffer");
     started_ = true;
-    auto& block = blocks_[ppn / config_.pages_per_block];
-    const auto page = ppn % config_.pages_per_block;
+    const auto slot = block_slot(ppn);
+    auto& block = blocks_[slot];
+    const auto page = block_page_slot(ppn);
     if (page && page != block.next_page) throw std::runtime_error("HBF write-order status 0x6");
-    if (!page) { cache_purge_block(ppn / config_.pages_per_block);
-        for (std::uint32_t p = 0; p < config_.pages_per_block; ++p) program_ready_.erase(ppn + p); }
+    if (!page) { cache_purge_block(slot);
+        for (std::uint32_t p = 0; p < config_.pages_per_block; ++p)
+            program_ready_.erase(page_of_block_slot(slot, p)); }
     block.next_page = static_cast<std::uint32_t>(page + 1);
     // Any program consumes a pre-erased state.
     bool preerased = false;
-    if (!erased_.empty() && erased_[ppn / config_.pages_per_block]) {
-        erased_[ppn / config_.pages_per_block] = 0; --unconsumed_erased_;
+    if (!erased_.empty() && erased_[slot]) {
+        erased_[slot] = 0; --unconsumed_erased_;
         preerased = page == 0;
     }
     return page == 0 && !preerased;
 }
 void HbfDevice::complete_program(std::uint64_t ppn, double ready) {
     validate_page(ppn);
-    if (!blocks_[ppn / config_.pages_per_block].next_page)
+    if (!blocks_[block_slot(ppn)].next_page)
         throw std::out_of_range("HBF program completion for an unprogrammed block");
     if (!std::isfinite(ready) || ready < 0) throw std::invalid_argument("invalid HBF program completion time");
     if (const auto pending = writes_.find(ppn); pending != writes_.end()) {
@@ -258,7 +284,7 @@ void HbfDevice::complete_program(std::uint64_t ppn, double ready) {
 }
 double HbfDevice::read_ready(std::uint64_t ppn) const {
     validate_page(ppn);
-    if (ppn % config_.pages_per_block >= blocks_[ppn / config_.pages_per_block].next_page)
+    if (block_page_slot(ppn) >= blocks_[block_slot(ppn)].next_page)
         throw std::runtime_error("HBF erased-page read status 0x7");
     if (program_ready_.empty()) return 0;
     const auto ready = program_ready_.find(ppn);
@@ -270,8 +296,8 @@ void HbfDevice::erase(std::uint64_t block) {
     if (!erased_.empty() && erased_[block]) { erased_[block] = 0; --unconsumed_erased_; }
     blocks_[block].next_page = 0;
     cache_purge_block(block);
-    for (auto page = block * config_.pages_per_block; page < (block + 1) * config_.pages_per_block; ++page)
-        program_ready_.erase(page);
+    for (std::uint32_t p = 0; p < config_.pages_per_block; ++p)
+        program_ready_.erase(page_of_block_slot(static_cast<std::size_t>(block), p));
 }
 void HbfDevice::CachePages::remove(std::uint64_t page) {
     const auto at = std::find(begin(), end(), page);
@@ -453,13 +479,15 @@ void HbfDevice::cache_purge_page(std::uint64_t ppn) {
         throw std::logic_error("HBF cache invalidation lost a reserved consumer");
 }
 void HbfDevice::cache_purge_block(std::uint64_t block) {
-    const auto b = cache_.find(bank_for_page(block * config_.pages_per_block));
+    const auto first = page_of_block_slot(static_cast<std::size_t>(block), 0);
+    const auto b = cache_.find(bank_for_page(first));
     if (b == cache_.end()) return;
+    const auto slot = static_cast<std::size_t>(block);
     std::set<std::uint64_t> pages;
     for (const auto page : b->second.resident)
-        if (page / config_.pages_per_block == block) pages.insert(page);
+        if (block_slot(page) == slot) pages.insert(page);
     for (const auto& timed : b->second.events)
-        if (timed.event.page / config_.pages_per_block == block) pages.insert(timed.event.page);
+        if (block_slot(timed.event.page) == slot) pages.insert(timed.event.page);
     for (const auto page : pages) cache_purge_page(page);
 }
 }

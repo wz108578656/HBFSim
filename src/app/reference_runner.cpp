@@ -4757,6 +4757,7 @@ void write_system_config_keys(std::ostream& out, const SystemConfig& system) {
     put("hbf-zone-size-blocks", hbf.host.zone_size_blocks);
     put("hbf-host-zone-wear-gap", hbf.host.host_zone_wear_gap);
     put("hbf-host-zone-remap-ns", hbf.host.host_zone_remap_ns);
+    put("hbf-address-layout", hbfsim::physical::hbf::address_layout_name(hbf.device.address_layout));
     put("hbf-stacks", hbf.device.stacks);
     put("hbf-channels", hbf.device.channels_per_stack);
     put("hbf-dies-per-channel", hbf.device.dies_per_channel);

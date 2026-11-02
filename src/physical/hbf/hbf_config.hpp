@@ -5,9 +5,38 @@
 
 namespace hbfsim::physical::hbf {
 
+// How a channel-local page index is split into die / plane(bank) / block / page.
+// The two layouts describe exactly the same capacity; they only disagree on
+// field order, which decides how a sequential stream spreads over the array.
+//
+// bank_major: stack | channel | die | plane | block | page
+//   The model's historical layout: a bank owns one contiguous capacity range,
+//   so consecutive channel-local pages stay in the same bank for
+//   blocks_per_plane x pages_per_block pages.
+//
+// ocp_v070:   stack | channel | block | page | die | plane
+//   OCP HBF v0.7.0 section 4.6 (p.22: "the first 4 bits in the local address
+//   represent the bank number, and the next 2 bits represent the die number")
+//   together with the section 5.7 replay algebra (p.63): inside one block the
+//   page index selects bank in its lowest bits, then die, then the page slot.
+//   A sequential stream therefore rotates over every bank and die.
+enum class AddressLayout : std::uint8_t {
+    bank_major = 0,
+    ocp_v070 = 1,
+};
+
+// Configuration token for the layout: the same spelling the config files and
+// the resolved-config export use.
+[[nodiscard]] inline std::string_view address_layout_name(AddressLayout layout) {
+    return layout == AddressLayout::ocp_v070 ? "ocp-v070" : "bank-major";
+}
+
 struct HbfDeviceConfig {
     std::uint32_t speed_grade = 2;
     static constexpr auto standard = kStandard;
+    // Selects the channel-local field order. bank_major keeps the historical
+    // behaviour; ocp_v070 follows the standard's published bit assignment.
+    AddressLayout address_layout = AddressLayout::bank_major;
     std::uint32_t stacks = 1;
     std::uint32_t channels_per_stack = 16;
     std::uint32_t dies_per_channel = 1;
