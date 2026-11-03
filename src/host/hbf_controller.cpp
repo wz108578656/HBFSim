@@ -5305,10 +5305,10 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                 throw std::runtime_error(
                     "HBF physical erase lost its block-epoch ownership");
             }
-            const auto block_begin = static_cast<std::uint64_t>(
-                block) * config_.device.pages_per_block;
             for (std::uint32_t page = 0; page < config_.device.pages_per_block; ++page) {
-                const auto ppn = block_begin + page;
+                // ocp_v070 strides a block's pages across banks and dies, so a
+                // block sweep must encode each slot instead of adding +page.
+                const auto ppn = ppn_for_block_page(block, page);
                 const auto it = programmed_pages_.find(ppn);
                 if (it == programmed_pages_.end()) {
                     continue;
@@ -6101,9 +6101,8 @@ void HbfController::device_dram_purge_page(std::uint64_t ppn) {
 
 void HbfController::device_dram_purge_block(std::size_t block_index) {
     if (!device_dram_enabled() || device_dram_by_stack_.at(stack_of_block(block_index)).empty()) return;
-    const auto first = static_cast<std::uint64_t>(block_index) * config_.device.pages_per_block;
     for (std::uint64_t page = 0; page < config_.device.pages_per_block; ++page)
-        device_dram_purge_page(first + page);
+        device_dram_purge_page(ppn_for_block_page(block_index, static_cast<std::uint32_t>(page)));
 }
 
 double HbfController::device_dram_ingress(std::size_t stack, std::uint64_t key,
@@ -9009,9 +9008,8 @@ void HbfController::release_invalid_block(std::size_t block_index) {
     }
     read_buffer_purge_block(block_index);
     device_dram_purge_block(block_index);
-    const auto block_begin = static_cast<std::uint64_t>(block_index) * config_.device.pages_per_block;
     for (std::uint32_t page = 0; page < config_.device.pages_per_block; ++page) {
-        programmed_pages_.erase(block_begin + page);
+        programmed_pages_.erase(ppn_for_block_page(block_index, page));
     }
 
     auto& block = blocks_.at(block_index);
@@ -10467,7 +10465,7 @@ double HbfController::schedule_erase_block(
     TransactionSource source,
     HeatmapTrafficSource heatmap_attribution, bool auto_erase) {
     if (!auto_erase) media_->erase(block);
-    const auto ppn = static_cast<std::uint64_t>(block) * config_.device.pages_per_block;
+    const auto ppn = ppn_for_block_page(block, 0);
     const auto addr = decode_ppn(ppn);
     auto& plane = planes_.at(plane_index(addr));
     std::string source_label;

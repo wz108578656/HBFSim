@@ -844,11 +844,12 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   <thead><tr><th>布局</th><th>256 页顺序读</th><th>每通道有效带宽</th><th>解析预期</th><th>顺序写（同样 256 页）</th></tr></thead>
   <tbody>
     <tr><td>bank-major（模型默认）</td><td class="num">1024.4 µs</td><td class="num">1.02 GB/s</td><td class="num">256 × tR = 1024 µs</td><td class="num">51.2 ms</td></tr>
-    <tr><td>ocp_v070（p.22 位序）</td><td class="num"><b>65.0 µs</b></td><td class="num"><b>16.13 GB/s</b></td><td class="num">16 × tR = 64 µs</td><td class="num">33.2 ms</td></tr>
+    <tr><td>ocp_v070（p.22 位序）</td><td class="num"><b>65.0 µs</b></td><td class="num"><b>16.13 GB/s</b></td><td class="num">16 × tR = 64 µs</td><td class="num"><b>3.2 ms</b></td></tr>
   </tbody>
 </table>
-<p class="muted">读数与解析式逐项吻合：bank-major 下 256 页全落在同一个 bank（16 blocks × 16 pages = 256 页/plane），只能串行 256 次 sense；ocp_v070 把它们均摊到 16 个 bank，每个 bank 16 次。写没有 16 倍差距（51.2 ms vs 33.2 ms），因为写路径还叠加了写累积/缓冲的串行约束——这也是 D6（cache program / 多平面）值得补的原因。</p>
+<p class="muted">读数与解析式逐项吻合：bank-major 下 256 页全落在同一个 bank（16 blocks × 16 pages = 256 页/plane），只能串行 256 次 sense；ocp_v070 把它们均摊到 16 个 bank，每个 bank 16 次。写同样吻合：bank-major 需 16 次块擦除串行（16 × 2 ms）+ 256 次 program（256 × 75 µs）≈ 51.2 ms，ocp_v070 的 16 次擦除在 16 个 bank 上并行、program 也并行，约 2 ms + 1.2 ms ≈ 3.2 ms。</p>
 <p><strong>但逻辑流量看不出差别</strong>：512 个顺序 4 KiB 逻辑读、每 1 µs 一发，两种布局都是 515.5 µs / 4.07 GB/s——主机 FTL 已经把 LPN 打散到各 plane。结论：<b>布局影响的是物理/旁路访问，以及主机映射不做 striping 时的排布</b>；这也是把 <code>ocp-v070</code> 做成可选 overlay、而不是直接改默认值的原因。</p>
+<p><strong>D6 诊断顺带修掉一个 OCP 路径的 bug</strong>：擦除/GC 回收/device-DRAM 清理这三处仍按 <code>block × pages_per_block + page</code> 线性遍历块内页，在 ocp_v070 下 16 个块的擦除全部解到同一个 plane，被串行成 16 × 2 ms，写因此假性慢到 33.2 ms。改成按布局编码后回到 3.2 ms——<b>换布局必须把所有"块内页连续"的假设一起排查，否则会得到假的性能结论</b>。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
 <h2 id="s9">9. 参考</h2>
