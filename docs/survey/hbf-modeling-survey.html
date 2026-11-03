@@ -97,7 +97,7 @@
     <li><a href="#s5">与 OCP 规范的差距审计</a><span>逐条差距 + 补齐优先级</span></li>
     <li><a href="#systemc">能否接入 SystemC</a><span>三条路径与四个坑</span></li>
     <li><a href="#s7">关键参数与默认值</a><span>Grade、时序、几何</span></li>
-    <li><a href="#s8">实测表现</a><span>grade × tR 对拍</span></li>
+    <li><a href="#s8">实测表现</a><span>grade × tR 对拍 + 地址布局 A/B</span></li>
     <li><a href="#s9">参考</a><span>仓库、论文、本地文档</span></li>
   </ol>
 </nav>
@@ -837,6 +837,19 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   </tbody>
 </table>
 <p class="muted">稳态值与解析式 <code>banks_per_channel × 4 KiB / tR</code> 逐位吻合；Grade 3 的 96 GB/s 天花板来自默认内部通路 101.25 GB/s 原始码字，不是接口也不是阵列。冷页读延迟 4.44–4.51 µs（tR=4 µs），同页缓存命中 131–196 ns。</p>
+
+<h3>8.1 地址布局 A/B：顺序物理访问下差 15.8 倍</h3>
+<p>B1 的动机就是这张表。同一台设备（1 通道 × 1 die × 16 bank，tR = 4 µs，4 KiB 页），把 256 个<b>连续物理页</b>一次性下发，只切换通道内的地址布局：</p>
+<table>
+  <thead><tr><th>布局</th><th>256 页顺序读</th><th>每通道有效带宽</th><th>解析预期</th><th>顺序写（同样 256 页）</th></tr></thead>
+  <tbody>
+    <tr><td>bank-major（模型默认）</td><td class="num">1024.4 µs</td><td class="num">1.02 GB/s</td><td class="num">256 × tR = 1024 µs</td><td class="num">51.2 ms</td></tr>
+    <tr><td>ocp_v070（p.22 位序）</td><td class="num"><b>65.0 µs</b></td><td class="num"><b>16.13 GB/s</b></td><td class="num">16 × tR = 64 µs</td><td class="num">33.2 ms</td></tr>
+  </tbody>
+</table>
+<p class="muted">读数与解析式逐项吻合：bank-major 下 256 页全落在同一个 bank（16 blocks × 16 pages = 256 页/plane），只能串行 256 次 sense；ocp_v070 把它们均摊到 16 个 bank，每个 bank 16 次。写没有 16 倍差距（51.2 ms vs 33.2 ms），因为写路径还叠加了写累积/缓冲的串行约束——这也是 D6（cache program / 多平面）值得补的原因。</p>
+<p><strong>但逻辑流量看不出差别</strong>：512 个顺序 4 KiB 逻辑读、每 1 µs 一发，两种布局都是 515.5 µs / 4.07 GB/s——主机 FTL 已经把 LPN 打散到各 plane。结论：<b>布局影响的是物理/旁路访问，以及主机映射不做 striping 时的排布</b>；这也是把 <code>ocp-v070</code> 做成可选 overlay、而不是直接改默认值的原因。</p>
+<p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
 <h2 id="s9">9. 参考</h2>
 <ul>
