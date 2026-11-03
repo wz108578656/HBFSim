@@ -902,6 +902,9 @@ public:
     // Structural capacity/wear and fabric-parallelism fields are refreshed
     // only by stats(); this view is deliberately safe on every serving batch.
     [[nodiscard]] const HbfStats& execution_stats() const { return stats_; }
+    // Read-only view of the physical device. Verification probes need the
+    // per-block read-disturb counters, which stay device state.
+    [[nodiscard]] const physical::hbf::HbfDevice& media_device() const { return *media_; }
     [[nodiscard]] const HbfConfig& config() const { return config_; }
     // Diagnostic only: reconstruct distinct valid pages at a modeled instant.
     // Never called on the production per-request fast path.
