@@ -99,6 +99,7 @@
     <li><a href="#s7">关键参数与默认值</a><span>Grade、时序、几何</span></li>
     <li><a href="#s8">实测表现</a><span>grade × tR 对拍 + 地址布局 A/B</span></li>
     <li><a href="#s9">参考</a><span>仓库、论文、本地文档</span></li>
+    <li><a href="#s10">完成度取证</a><span>fork 当前代码重跑的验收数据</span></li>
   </ol>
 </nav>
 
@@ -853,6 +854,45 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>D6 诊断顺带修掉一个 OCP 路径的 bug</strong>：擦除/GC 回收/device-DRAM 清理这三处仍按 <code>block × pages_per_block + page</code> 线性遍历块内页，在 ocp_v070 下 16 个块的擦除全部解到同一个 plane，被串行成 16 × 2 ms，写因此假性慢到 33.2 ms。改成按布局编码后回到 3.2 ms——<b>换布局必须把所有"块内页连续"的假设一起排查，否则会得到假的性能结论</b>。</p>
 <p><strong>同一类假设在 GC / 磨损均衡里还有第二处</strong>：<code>relocate_live_pages</code> 与回收校验都用 <code>block_begin + page</code> 找块内页，在 ocp_v070 下重定位会读写错页，回收提交时直接报 “GC source page table remained live at reclaim commit”。已一并改为按布局编码，并新增 <code>hbf_gc_layout</code> 测试：回退修复该测试失败、恢复修复后通过，两层验证都留在了仓库里。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
+
+<h2 id="s10">10. 完成度取证（fork 当前代码重跑）</h2>
+<p>以下是目标验收的重跑数据，全部在 fork 分支 <code>feat/ocp-v070-gaps</code> 的当前代码上执行（地址布局、GC/擦除修复、刷新机制均已合入），用于确认后续改动没有让既有结论回归。</p>
+
+<h3>10.1 规格带宽复现</h3>
+<table>
+  <thead><tr><th>配置</th><th>banks/通道</th><th>实测每通道</th><th>规格</th><th>结论</th></tr></thead>
+  <tbody>
+    <tr><td>Grade 1，tR=1 µs</td><td class="num">16</td><td class="num">48.00 GB/s</td><td class="num">48</td><td>精确命中</td></tr>
+    <tr><td>Grade 2，tR=2 µs</td><td class="num">64</td><td class="num">96.00 GB/s</td><td class="num">96</td><td>精确命中</td></tr>
+    <tr><td>Grade 2，tR=4 µs</td><td class="num">64</td><td class="num">65.56 GB/s</td><td class="num">96</td><td>阵列受限 <code>64×4 KiB/4 µs</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">方法：斜率法（每 bank 1 轮 vs 5 轮差分）消除流水线填充；4 个 HBF stack，数值已折算到单通道。</p>
+
+<h3>10.2 地址布局 A/B（顺序物理访问）</h3>
+<table>
+  <thead><tr><th>布局</th><th>256 页顺序读</th><th>顺序写</th><th>解析预期</th></tr></thead>
+  <tbody>
+    <tr><td>bank-major</td><td class="num">1024.4 µs（1.02 GB/s）</td><td class="num">51.2 ms</td><td class="num">256×tR；16 次擦除 + 256 次编程</td></tr>
+    <tr><td>ocp_v070</td><td class="num"><b>65.0 µs（16.13 GB/s）</b></td><td class="num"><b>3.2 ms</b></td><td class="num">16×tR；16 擦除并行 + 16×tR 编程</td></tr>
+  </tbody>
+</table>
+<p class="muted">读写分别 15.8× / 16×，与解析式逐项吻合，说明模型把"布局 → bank 并行度 → 有效带宽"这条链路算对了。</p>
+
+<h3>10.3 验证与回归</h3>
+<ul>
+  <li><strong>全量测试 146/148 通过</strong>；仅两个 <code>serveloop_*</code> 用例失败，原因是需要外部 ServeLoop 仓库检出（基线同样失败，属环境缺口）。</li>
+  <li>与规格、布局、刷新相关的新增用例：<code>hbf_address_layout</code>（双布局往返 / p.22 低位规则 / p.63 Bank_Num 代数）、<code>hbf_read_disturb</code>、<code>hbf_read_disturb_controller</code>、<code>hbf_gc_layout</code>。</li>
+  <li><strong>两个 OCP 路径 bug 被测试钉住</strong>：块内页线性遍历（擦除/清理/重定位），回退修复时 <code>hbf_gc_layout</code> 失败、恢复后通过。</li>
+  <li>默认行为等价性：阈值/retention/刷新开关取默认值时，场景结果与改动前完全一致。</li>
+</ul>
+
+<h3>10.4 已知边界（明确不宣称）</h3>
+<ul>
+  <li>未建模：scratchpad、batch read hint、UCIe flit/CRC/replay、per-AXI-ID 响应队列、UECC/CECC 失效、多平面/cache program、坏块与 retention 失效（详见第 5 章差距审计）。</li>
+  <li>刷新：检测、触发、重写、独立记账、<code>waf_refresh</code> 上报已完成；die 级互斥以"共享 per-die sequencer / per-bank sense 资源"的方式近似，未引入独立 gate。</li>
+  <li>时序参数（tR/tPROG/tERS、内部通路带宽）是研究假设，已在 provenance 中标注证据等级。</li>
+</ul>
 
 <h2 id="s9">9. 参考</h2>
 <ul>
