@@ -621,8 +621,6 @@ std::uint32_t HbfController::relocate_live_pages(ActiveRelocation& relocation,
     const bool wear_leveling =
         relocation.purpose == RelocationPurpose::StaticWearLeveling;
     at_ns = std::max(at_ns, relocation.selection_ready_ns);
-    const auto block_begin =
-        static_cast<std::uint64_t>(victim_block) * config_.device.pages_per_block;
     const auto first_sequence = next_commit_sequence_;
     std::uint32_t relocated = 0;
     auto page = relocation.scan_page;
@@ -631,7 +629,9 @@ std::uint32_t HbfController::relocate_live_pages(ActiveRelocation& relocation,
         if (!victim.is_valid(page)) {
             continue;
         }
-        const auto old_ppn = block_begin + page;
+        // Under ocp_v070 a block's pages are strided across banks and dies, so
+        // the source page must be encoded rather than computed linearly.
+        const auto old_ppn = ppn_for_block_page(victim_block, page);
         std::uint64_t lpn = 0;
         PageOwner owner = PageOwner::Unassigned;
         if (const auto materialized = programmed_pages_.find(old_ppn);
@@ -883,8 +883,6 @@ double HbfController::schedule_relocation_reclaim(ActiveRelocation relocation,
                 "HBF GC reclaim lost its in-flight reservation");
         }
         const auto finish_ns = pending->second.finish_ns;
-        const auto block_begin = static_cast<std::uint64_t>(
-            victim_block) * config_.device.pages_per_block;
         for (std::uint32_t page = 0;
              page < config_.device.pages_per_block;
              ++page) {
@@ -892,7 +890,7 @@ double HbfController::schedule_relocation_reclaim(ActiveRelocation relocation,
                 throw std::runtime_error(
                     "HBF GC reclaim reached commit with a live source page");
             }
-            const auto ppn = block_begin + page;
+            const auto ppn = ppn_for_block_page(victim_block, page);
             if (const auto state = programmed_pages_.find(ppn);
                 state != programmed_pages_.end() &&
                 state->second.status == PageStatus::Valid) {

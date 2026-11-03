@@ -851,6 +851,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p class="muted">读数与解析式逐项吻合：bank-major 下 256 页全落在同一个 bank（16 blocks × 16 pages = 256 页/plane），只能串行 256 次 sense；ocp_v070 把它们均摊到 16 个 bank，每个 bank 16 次。写同样吻合：bank-major 需 16 次块擦除串行（16 × 2 ms）+ 256 次 program（256 × 75 µs）≈ 51.2 ms，ocp_v070 的 16 次擦除在 16 个 bank 上并行、program 也并行，约 2 ms + 1.2 ms ≈ 3.2 ms。</p>
 <p><strong>但逻辑流量看不出差别</strong>：512 个顺序 4 KiB 逻辑读、每 1 µs 一发，两种布局都是 515.5 µs / 4.07 GB/s——主机 FTL 已经把 LPN 打散到各 plane。结论：<b>布局影响的是物理/旁路访问，以及主机映射不做 striping 时的排布</b>；这也是把 <code>ocp-v070</code> 做成可选 overlay、而不是直接改默认值的原因。</p>
 <p><strong>D6 诊断顺带修掉一个 OCP 路径的 bug</strong>：擦除/GC 回收/device-DRAM 清理这三处仍按 <code>block × pages_per_block + page</code> 线性遍历块内页，在 ocp_v070 下 16 个块的擦除全部解到同一个 plane，被串行成 16 × 2 ms，写因此假性慢到 33.2 ms。改成按布局编码后回到 3.2 ms——<b>换布局必须把所有"块内页连续"的假设一起排查，否则会得到假的性能结论</b>。</p>
+<p><strong>同一类假设在 GC / 磨损均衡里还有第二处</strong>：<code>relocate_live_pages</code> 与回收校验都用 <code>block_begin + page</code> 找块内页，在 ocp_v070 下重定位会读写错页，回收提交时直接报 “GC source page table remained live at reclaim commit”。已一并改为按布局编码，并新增 <code>hbf_gc_layout</code> 测试：回退修复该测试失败、恢复修复后通过，两层验证都留在了仓库里。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
 <h2 id="s9">9. 参考</h2>

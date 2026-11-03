@@ -50,6 +50,10 @@ add_executable(hbf_read_disturb_controller_test tests/cpp/hbf_read_disturb_contr
 target_link_libraries(hbf_read_disturb_controller_test PRIVATE hbfsim_core)
 add_test(NAME hbf_read_disturb_controller COMMAND hbf_read_disturb_controller_test)
 
+add_executable(hbf_gc_layout_test tests/cpp/hbf_gc_layout_test.cpp)
+target_link_libraries(hbf_gc_layout_test PRIVATE hbfsim_core)
+add_test(NAME hbf_gc_layout COMMAND hbf_gc_layout_test)
+
 add_executable(hbf_read_disturb_test tests/cpp/hbf_read_disturb_test.cpp)
 target_link_libraries(hbf_read_disturb_test PRIVATE hbfsim_core)
 add_test(NAME hbf_read_disturb COMMAND hbf_read_disturb_test)
