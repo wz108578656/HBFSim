@@ -99,6 +99,52 @@ void erase_restarts_the_counter(AddressLayout layout) {
     require(device.block_read_count_exceeds_threshold(2) == false, "cleared block still hot");
 }
 
+// Retention ages from the block's first program after erase: a later program of
+// a younger page must not postpone the deadline.
+void retention_ages_from_the_first_program(AddressLayout layout) {
+    auto config = make_config(layout, 0);
+    config.retention_ns = 500;
+    HbfDevice device(config);
+    for (std::uint64_t block = 0; block < 8; ++block)
+        device.seed_block(block, config.pages_per_block);
+
+    const auto first = page_of_block(config, 3, 0);
+    const auto second = page_of_block(config, 3, 1);
+    require(device.block_retention_age_ns(3, 1'000.0) == 0.0,
+            "a block with no program must not age");
+    require(!device.block_exceeds_retention(3, 1'000.0),
+            "unprogrammed block reported as needing retention refresh");
+
+    device.record_page_program(first, 100.0);
+    require(device.block_retention_age_ns(3, 1'000.0) == 900.0,
+            "age must be measured from the first program");
+    device.record_page_program(second, 800.0);
+    require(device.block_retention_age_ns(3, 1'000.0) == 900.0,
+            "a later program must not move the retention clock");
+    require(!device.block_exceeds_retention(3, 500.0),
+            "age below the interval reported as expired");
+    require(device.block_exceeds_retention(3, 700.0),
+            "age above the interval not reported as expired");
+
+    device.record_erase(3);
+    require(device.block_retention_age_ns(3, 5'000.0) == 0.0,
+            "erase must clear the retention clock");
+}
+
+// A zero interval is the pre-refresh model: no retention report ever fires.
+void zero_retention_disables_the_signal(AddressLayout layout) {
+    auto config = make_config(layout, 0);
+    config.retention_ns = 0;
+    HbfDevice device(config);
+    for (std::uint64_t block = 0; block < 8; ++block)
+        device.seed_block(block, config.pages_per_block);
+    device.record_page_program(page_of_block(config, 0, 0), 0.0);
+    require(device.block_retention_age_ns(0, 1e18) > 0.0,
+            "the clock must still run when the interval is disabled");
+    require(!device.block_exceeds_retention(0, 1e18),
+            "a zero retention interval must never report a block");
+}
+
 // A zero threshold is the pre-refresh model: the counter still exists but never
 // reports block health, so existing scenarios cannot change.
 void zero_threshold_disables_the_signal(AddressLayout layout) {
@@ -122,6 +168,8 @@ int main() {
             reads_on_any_page_of_the_block_count(layout);
             erase_restarts_the_counter(layout);
             zero_threshold_disables_the_signal(layout);
+            retention_ages_from_the_first_program(layout);
+            zero_retention_disables_the_signal(layout);
         }
     } catch (const std::exception& error) {
         std::cerr << "hbf_read_disturb: " << error.what() << '\n';

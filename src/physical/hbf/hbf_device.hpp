@@ -52,10 +52,18 @@ public:
     std::uint32_t record_erase(std::uint64_t block);
     // Called once for each page sense, whatever the request granularity was.
     void record_page_read(std::uint64_t ppn);
+    // Called once for each completed page program, to age the block's data.
+    void record_page_program(std::uint64_t ppn, double finish_ns);
     [[nodiscard]] std::uint64_t block_read_count(std::uint64_t block) const;
     // True once the block has induced more read disturb than the product
     // threshold allows. A zero threshold disables the check.
     [[nodiscard]] bool block_read_count_exceeds_threshold(std::uint64_t block) const;
+    // Age of the oldest data in the block, zero when it holds no data or when
+    // the caller asks before the first program finished.
+    [[nodiscard]] double block_retention_age_ns(std::uint64_t block, double now_ns) const;
+    // True once the oldest data is older than the configured retention
+    // interval. A zero interval disables the check.
+    [[nodiscard]] bool block_exceeds_retention(std::uint64_t block, double now_ns) const;
     [[nodiscard]] const std::map<std::uint64_t, std::uint64_t>& zone_mapping() const { return zone_mapping_; }
     void validate_zone_mapping(const std::map<std::uint64_t, std::uint64_t>& mapping) const;
     void restore_zone_mapping(const std::map<std::uint64_t, std::uint64_t>& mapping);
@@ -116,6 +124,10 @@ private:
         // last erase. Read disturb is an array effect, so this counts senses
         // and not host requests; the decoded page cache adds nothing.
         std::uint64_t read_count = 0;
+        // Completion time of the first page programmed after the last erase:
+        // the oldest data in the block, which is what a retention interval
+        // ages. Negative means the block holds no programmed page yet.
+        double first_program_ns = -1.0;
     };
     struct CacheEvent { std::uint64_t page; int action; /* -1 invalidate, 0 touch, 1 fill */ };
     struct CachePages {

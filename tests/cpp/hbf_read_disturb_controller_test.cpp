@@ -3,6 +3,7 @@
 // re-read of the same page all answer from one array access.
 #include "../../verification/probes/hbf_with_hbm.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -54,6 +55,14 @@ std::uint64_t senses(const Device& device) {
     return total;
 }
 
+double oldest_age(const Device& device, double now_ns) {
+    const auto& media = device.media_device();
+    double age = 0.0;
+    for (std::uint64_t block = 0; block < 16 * 2; ++block)
+        age = std::max(age, media.block_retention_age_ns(block, now_ns));
+    return age;
+}
+
 std::uint64_t hot_blocks(const Device& device) {
     const auto& media = device.media_device();
     std::uint64_t total = 0;
@@ -90,6 +99,15 @@ void a_second_page_of_the_same_block_adds_one() {
     check(senses(device) == after_first + 1, "a distinct page must sense once more");
 }
 
+void a_program_starts_the_retention_clock() {
+    Device device(config(0));
+    check(oldest_age(device, 10'000.0) == 0.0, "an unprogrammed device must not age");
+    const auto finish = issue(device, Op::Write, 0, 0.0);
+    check(finish > 0.0, "the setup program did not complete");
+    check(oldest_age(device, finish + 1'000.0) >= 1'000.0,
+          "the programmed block must age from its program completion");
+}
+
 void threshold_reports_health_only_when_configured() {
     Device disabled(config(0));
     issue(disabled, Op::Write, 0, 0.0);
@@ -109,6 +127,7 @@ void threshold_reports_health_only_when_configured() {
 int main() {
     try {
         repeated_reads_share_one_sense();
+        a_program_starts_the_retention_clock();
         a_second_page_of_the_same_block_adds_one();
         threshold_reports_health_only_when_configured();
     } catch (const std::exception& error) {

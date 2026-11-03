@@ -90,6 +90,7 @@ void HbfDevice::seed_block(std::uint64_t block, std::uint32_t pages, std::uint32
     if (started_ || pages > config_.pages_per_block) throw std::logic_error("invalid timed HBF image installation");
     if (pages) blocks_[block].next_page = pages;
     blocks_[block].read_count = 0;
+    blocks_[block].first_program_ns = -1.0;
     physical_pec_[block] = pec;
 }
 void HbfDevice::seed_erased_block(std::uint64_t block) {
@@ -158,9 +159,10 @@ std::uint32_t HbfDevice::record_erase(std::uint64_t block) {
     auto& pec = physical_pec_[block];
     if (pec == std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error("HBF physical PEC overflow");
     started_ = true;
-    // Erasing the block removes the disturbed pages, so the read-disturb
-    // counter restarts together with the P/E cycle.
+    // Erasing the block removes the disturbed pages, so both the read-disturb
+    // counter and the retention clock restart with the P/E cycle.
     blocks_.at(block).read_count = 0;
+    blocks_.at(block).first_program_ns = -1.0;
     return ++pec;
 }
 void HbfDevice::record_page_read(std::uint64_t ppn) {
@@ -169,6 +171,23 @@ void HbfDevice::record_page_read(std::uint64_t ppn) {
     if (count == std::numeric_limits<std::uint64_t>::max())
         throw std::runtime_error("HBF block read count overflow");
     ++count;
+}
+void HbfDevice::record_page_program(std::uint64_t ppn, double finish_ns) {
+    validate_page(ppn);
+    if (!std::isfinite(finish_ns) || finish_ns < 0)
+        throw std::invalid_argument("invalid HBF program completion time");
+    auto& block = blocks_.at(block_slot(ppn));
+    if (block.first_program_ns < 0) block.first_program_ns = finish_ns;
+}
+double HbfDevice::block_retention_age_ns(std::uint64_t block, double now_ns) const {
+    validate_block(block);
+    const auto first = blocks_.at(block).first_program_ns;
+    if (first < 0 || !std::isfinite(now_ns) || now_ns <= first) return 0.0;
+    return now_ns - first;
+}
+bool HbfDevice::block_exceeds_retention(std::uint64_t block, double now_ns) const {
+    if (!config_.retention_ns) return false;
+    return block_retention_age_ns(block, now_ns) > static_cast<double>(config_.retention_ns);
 }
 std::uint64_t HbfDevice::block_read_count(std::uint64_t block) const {
     validate_block(block);

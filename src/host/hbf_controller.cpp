@@ -10458,6 +10458,9 @@ double HbfController::schedule_buffered_program_page(
         });
     }
     media_->complete_program(ppn, program_done);
+    // The block's oldest data starts ageing from this completion; a later
+    // program of a younger page must not push the retention deadline out.
+    media_->record_page_program(ppn, program_done);
     return program_done;
 }
 

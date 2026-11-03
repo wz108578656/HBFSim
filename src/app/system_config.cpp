@@ -90,6 +90,7 @@ const std::unordered_set<std::string>& owned_keys() {
         "hbm-capacity-bytes", "hbf-capacity-bytes", "hbf-capacity-ratio",
         "hbf-address-layout",
         "hbf-read-count-threshold",
+        "hbf-retention-ns",
         "base-die-link-read-bw", "base-die-link-write-bw",
         "base-die-link-latency-ns",
         "hbf-external-direct-link-enable",
@@ -410,6 +411,7 @@ void SystemConfigBuilder::apply(std::string_view key, std::string_view value) {
     SET_U32("hbf-pages-per-block", hbf_.device.pages_per_block)
     SET_U64("hbf-page-size", hbf_.device.page_size_bytes)
     SET_U64("hbf-read-count-threshold", hbf_.device.read_count_threshold)
+    SET_U64("hbf-retention-ns", hbf_.device.retention_ns)
     SET_U64("hbf-oob-bytes", hbf_.device.oob_bytes_per_page)
     SET_U32("hbf-media-lanes-per-plane", hbf_.device.media_lanes_per_plane)
     SET_U32(

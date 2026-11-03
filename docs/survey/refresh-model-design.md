@@ -71,8 +71,11 @@ reads.** The threshold does not change with temperature.
 ### D4 — Retention path
 
 **Separate trigger, same action: `hbf-retention-ns`, default 0 (disabled),
-example 24 h.** A block whose last program is older than the interval is a
-refresh candidate even with a low read count.
+example 24 h.** A block whose **oldest** page is older than the interval is a
+refresh candidate even with a low read count. Age is measured from the first
+program after the last erase, not from the most recent program: retention risk
+follows the oldest data in the block, so programming young pages must never push
+the deadline out.
 
 Both triggers feed the same host policy. The retention interval is the other
 half of OCP §11.5 and is trivial to support once the read path exists, so it is
@@ -123,13 +126,15 @@ direction (every published key has provenance).
 | D3 threshold predicate, default disabled | done | `hbf-read-count-threshold`, `block_read_count_exceeds_threshold` |
 | D5 erase clears the count | done | `record_erase` |
 | D5 health bits `0x1`/`0x2` on the read response | todo | needs the read status path |
-| D4 retention trigger | todo | needs `last_program_ns` per block |
+| D4 retention trigger | done | `first_program_ns` per block, `hbf-retention-ns`, `block_exceeds_retention` |
 | Host rewrite policy and refresh accounting | todo | needs a policy pass plus `waf_refresh` |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
 
-Tests: `hbf_read_disturb` (device arithmetic, both layouts), 
-`hbf_read_disturb_controller` (one sense per page across cached re-reads and
-64 B fragments, threshold signalling only when configured).
+Tests: `hbf_read_disturb` (device arithmetic for both layouts: per-sense
+counting, threshold boundary, erase reset, retention ageing from the first
+program, disabled signals), `hbf_read_disturb_controller` (one sense per page
+across cached re-reads and 64 B fragments, threshold signalling only when
+configured, the retention clock starting at a real program completion).
 
 ## Acceptance criteria for the implementation
 

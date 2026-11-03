@@ -49,6 +49,9 @@ struct HbfDeviceConfig {
     // number; 0 disables the check so the model keeps its pre-refresh behaviour.
     // See docs/survey/refresh-model-design.md for the choices behind it.
     std::uint64_t read_count_threshold = 0;
+    // OCP p118 retention interval: how long programmed data may sit unrefreshed.
+    // A product datasheet owns the number; 0 disables the check.
+    std::uint64_t retention_ns = 0;
     // Out-of-band (spare) bytes per page: ECC parity, reverse LPN mapping,
     // block status. Shares the page's wordline, so array timings are
     // unchanged. Flash-side raw transfers and ECC move page + OOB; decoded
