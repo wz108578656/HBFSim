@@ -89,6 +89,7 @@ void HbfDevice::seed_block(std::uint64_t block, std::uint32_t pages, std::uint32
     validate_block(block);
     if (started_ || pages > config_.pages_per_block) throw std::logic_error("invalid timed HBF image installation");
     if (pages) blocks_[block].next_page = pages;
+    blocks_[block].read_count = 0;
     physical_pec_[block] = pec;
 }
 void HbfDevice::seed_erased_block(std::uint64_t block) {
@@ -157,7 +158,25 @@ std::uint32_t HbfDevice::record_erase(std::uint64_t block) {
     auto& pec = physical_pec_[block];
     if (pec == std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error("HBF physical PEC overflow");
     started_ = true;
+    // Erasing the block removes the disturbed pages, so the read-disturb
+    // counter restarts together with the P/E cycle.
+    blocks_.at(block).read_count = 0;
     return ++pec;
+}
+void HbfDevice::record_page_read(std::uint64_t ppn) {
+    validate_page(ppn);
+    auto& count = blocks_.at(block_slot(ppn)).read_count;
+    if (count == std::numeric_limits<std::uint64_t>::max())
+        throw std::runtime_error("HBF block read count overflow");
+    ++count;
+}
+std::uint64_t HbfDevice::block_read_count(std::uint64_t block) const {
+    validate_block(block);
+    return blocks_.at(block).read_count;
+}
+bool HbfDevice::block_read_count_exceeds_threshold(std::uint64_t block) const {
+    if (!config_.read_count_threshold) return false;
+    return block_read_count(block) > config_.read_count_threshold;
 }
 std::uint64_t HbfDevice::zone_pec_sum(std::uint64_t zone) const {
     const auto physical = physical_zone(zone);

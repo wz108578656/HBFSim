@@ -9895,6 +9895,7 @@ double HbfController::schedule_read_group_page(
     ++stats_.flash_scheduler_issues;
 
     const auto sense = slot(issue.finish_ns, d.t_read_page_ns, sense_bank.timeline);
+    media_->record_page_read(ppn);
     const auto transfer = slot(sense.finish_ns, group.lane_ns, lane.timeline);
     const auto staged = slot(transfer.finish_ns, group.buffer_ns, buffer.timeline);
     b.scheduler_queue_wait_ns += sense.wait_ns;
@@ -10057,6 +10058,9 @@ double HbfController::schedule_read_page(
             0.0, page_buffer.start_ns - lane_transfer.finish_ns);
         break;
     }
+    // One sense of this page happened, so its block accumulates one disturb
+    // event regardless of how many requests the page answered.
+    media_->record_page_read(ppn);
     const double media_start = sense.start_ns;
     breakdown.scheduler_queue_wait_ns += std::max(0.0, media_start - tsu.finish_ns);
     const double sense_done = media_start + config_.device.t_read_page_ns;

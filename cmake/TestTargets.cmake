@@ -46,6 +46,10 @@ add_executable(hbf_device_dram_test tests/cpp/hbf_device_dram_test.cpp)
 target_link_libraries(hbf_device_dram_test PRIVATE hbfsim_core)
 add_test(NAME hbf_device_dram COMMAND hbf_device_dram_test)
 
+add_executable(hbf_read_disturb_test tests/cpp/hbf_read_disturb_test.cpp)
+target_link_libraries(hbf_read_disturb_test PRIVATE hbfsim_core)
+add_test(NAME hbf_read_disturb COMMAND hbf_read_disturb_test)
+
 add_executable(hbf_address_layout_test tests/cpp/hbf_address_layout_test.cpp)
 target_link_libraries(hbf_address_layout_test PRIVATE hbfsim_core)
 add_test(NAME hbf_address_layout COMMAND hbf_address_layout_test)

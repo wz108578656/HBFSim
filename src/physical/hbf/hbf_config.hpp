@@ -44,6 +44,11 @@ struct HbfDeviceConfig {
     std::uint32_t blocks_per_plane = 2048;
     std::uint32_t pages_per_block = 256;
     std::uint64_t page_size_bytes = 4096;
+    // OCP p59-61/p118 block health: senses a physical block may take before its
+    // data is reported as requiring a refresh. A product datasheet owns this
+    // number; 0 disables the check so the model keeps its pre-refresh behaviour.
+    // See docs/survey/refresh-model-design.md for the choices behind it.
+    std::uint64_t read_count_threshold = 0;
     // Out-of-band (spare) bytes per page: ECC parity, reverse LPN mapping,
     // block status. Shares the page's wordline, so array timings are
     // unchanged. Flash-side raw transfers and ECC move page + OOB; decoded

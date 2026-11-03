@@ -50,6 +50,12 @@ public:
     [[nodiscard]] std::uint32_t block_pec(std::uint64_t block) const;
     // Called once for each scheduled physical erase, including page zero.
     std::uint32_t record_erase(std::uint64_t block);
+    // Called once for each page sense, whatever the request granularity was.
+    void record_page_read(std::uint64_t ppn);
+    [[nodiscard]] std::uint64_t block_read_count(std::uint64_t block) const;
+    // True once the block has induced more read disturb than the product
+    // threshold allows. A zero threshold disables the check.
+    [[nodiscard]] bool block_read_count_exceeds_threshold(std::uint64_t block) const;
     [[nodiscard]] const std::map<std::uint64_t, std::uint64_t>& zone_mapping() const { return zone_mapping_; }
     void validate_zone_mapping(const std::map<std::uint64_t, std::uint64_t>& mapping) const;
     void restore_zone_mapping(const std::map<std::uint64_t, std::uint64_t>& mapping);
@@ -104,7 +110,13 @@ private:
     // Physical page of a block slot's k-th page, in whatever order the layout
     // places it. ocp_v070 strides these pages across banks and dies.
     [[nodiscard]] std::uint64_t page_of_block_slot(std::size_t block_slot, std::uint32_t page) const;
-    struct Block { std::uint32_t next_page = 0; };
+    struct Block {
+        std::uint32_t next_page = 0;
+        // OCP p19 page read counter: senses of this physical block since its
+        // last erase. Read disturb is an array effect, so this counts senses
+        // and not host requests; the decoded page cache adds nothing.
+        std::uint64_t read_count = 0;
+    };
     struct CacheEvent { std::uint64_t page; int action; /* -1 invalidate, 0 touch, 1 fill */ };
     struct CachePages {
         std::array<std::uint64_t, kCachedPagesPerBank> pages{};
