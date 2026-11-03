@@ -114,6 +114,23 @@ before the code is the same ordering the upstream project uses for planned
 physical parameters, and the documentation gate only checks the forward
 direction (every published key has provenance).
 
+## Implementation progress
+
+| Piece | State | Where |
+|---|---|---|
+| D1 per-sense read counting | done | `HbfDevice::record_page_read`, both read kernels in `HbfController` |
+| D2 per physical block, any page | done | same counter, keyed by canonical block slot |
+| D3 threshold predicate, default disabled | done | `hbf-read-count-threshold`, `block_read_count_exceeds_threshold` |
+| D5 erase clears the count | done | `record_erase` |
+| D5 health bits `0x1`/`0x2` on the read response | todo | needs the read status path |
+| D4 retention trigger | todo | needs `last_program_ns` per block |
+| Host rewrite policy and refresh accounting | todo | needs a policy pass plus `waf_refresh` |
+| Die-level exclusion during refresh | todo | needs a per-die gate |
+
+Tests: `hbf_read_disturb` (device arithmetic, both layouts), 
+`hbf_read_disturb_controller` (one sense per page across cached re-reads and
+64 B fragments, threshold signalling only when configured).
+
 ## Acceptance criteria for the implementation
 
 1. **Default-off is bit-identical**: with all four keys at their defaults, every
