@@ -529,7 +529,17 @@ struct HbfStats {
     // includes data-page rounding, mapping-page programs, and GC
     // relocations, but deliberately excludes OOB/ECC and transport framing.
     // A zero host-write denominator is undefined, never WAF=0.
+    // Raw physical programs are host writes through the append-to-publish
+    // interface: their payload is in the physical numerator, so it belongs in
+    // the host-written denominator too.
+    [[nodiscard]] std::uint64_t host_write_bytes() const {
+        return logical_write_bytes + raw_physical_program_payload_bytes;
+    }
     [[nodiscard]] std::optional<double> waf() const;
+    // Split of the same numerator into maintenance sources, so a read-driven
+    // refresh cost cannot hide inside the GC share.
+    [[nodiscard]] std::optional<double> waf_gc() const;
+    [[nodiscard]] std::optional<double> waf_refresh() const;
     [[nodiscard]] double active_span_ns() const;
     [[nodiscard]] double media_utilization() const;
     [[nodiscard]] double io_utilization() const;

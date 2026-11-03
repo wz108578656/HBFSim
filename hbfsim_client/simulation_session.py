@@ -604,6 +604,13 @@ def _validate_device_accounting(
                 hbf.get("static_wear_leveling_relocation_payload_bytes"),
                 f"{description}.hbf.static_wear_leveling_relocation_payload_bytes",
             )
+        # Refresh rewrites are a fifth physical-write component, omitted by
+        # engines that do not model the refresh policy.
+        if hbf.get("refresh_relocation_payload_bytes") is not None:
+            decomposed += _nonnegative_integer(
+                hbf.get("refresh_relocation_payload_bytes"),
+                f"{description}.hbf.refresh_relocation_payload_bytes",
+            )
         if physical != decomposed:
             raise SimulationSessionError(
                 f"{description}.hbf physical write decomposition diverged"

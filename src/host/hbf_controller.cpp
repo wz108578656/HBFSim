@@ -476,20 +476,27 @@ std::string HbfAddress::path() const {
 }
 
 std::optional<double> HbfStats::waf() const {
-    // Raw physical programs are host writes through the append-to-publish
-    // interface: their payload is in the physical numerator, so it belongs
-    // in the host-written denominator too. Counting it only above inflated
-    // the WAF of any session that mixes published-extent appends with
-    // page-mapped writes.
-    const auto host_write_bytes = checked_add(
-        logical_write_bytes,
-        raw_physical_program_payload_bytes,
-        "HBF WAF host-write denominator");
-    if (host_write_bytes == 0) {
+    const auto host_bytes = host_write_bytes();
+    if (host_bytes == 0) {
         return std::nullopt;
     }
     return static_cast<double>(physical_write_bytes) /
-        static_cast<double>(host_write_bytes);
+        static_cast<double>(host_bytes);
+}
+
+std::optional<double> HbfStats::waf_gc() const {
+    const auto host_bytes = host_write_bytes();
+    if (host_bytes == 0) return std::nullopt;
+    return static_cast<double>(
+               gc_relocation_payload_bytes + static_wear_leveling_relocation_payload_bytes) /
+        static_cast<double>(host_bytes);
+}
+
+std::optional<double> HbfStats::waf_refresh() const {
+    const auto host_bytes = host_write_bytes();
+    if (host_bytes == 0) return std::nullopt;
+    return static_cast<double>(refresh_relocation_payload_bytes) /
+        static_cast<double>(host_bytes);
 }
 
 double HbfStats::active_span_ns() const {

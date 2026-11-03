@@ -136,7 +136,7 @@ direction (every published key has provenance).
 | Host rewrite action | done | `advance_refresh`, `RelocationPurpose::Refresh` |
 | Refresh accounting | done | `refresh_runs`, `refresh_relocations`, `refresh_relocation_payload_bytes`, `refresh_reclaimed_pages`; conservation identities extended |
 | Die-level exclusion during refresh | todo | needs the per-die gate the note describes |
-| `waf_refresh` in the reported summary | todo | counters exist, reporting does not |
+| `waf_refresh` in the reported summary | done | `HbfStats::waf_gc`/`waf_refresh`, session accounting JSON, client conservation check |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
 
 The rewrite reuses the GC relocation machinery: a candidate block that is

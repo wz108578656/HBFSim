@@ -741,9 +741,21 @@ void write_session_hbf_accounting(
         after.static_wear_leveling_relocation_payload_bytes,
         before.static_wear_leveling_relocation_payload_bytes,
         "hbf.static_wear_leveling_relocation_payload_bytes");
+    const auto refresh_runs = d(
+        after.refresh_runs, before.refresh_runs, "hbf.refresh_runs");
+    const auto refresh_relocations = d(
+        after.refresh_relocations, before.refresh_relocations, "hbf.refresh_relocations");
+    const auto refresh_relocation_payload_bytes = d(
+        after.refresh_relocation_payload_bytes,
+        before.refresh_relocation_payload_bytes,
+        "hbf.refresh_relocation_payload_bytes");
+    const auto refresh_reclaimed_pages = d(
+        after.refresh_reclaimed_pages, before.refresh_reclaimed_pages,
+        "hbf.refresh_reclaimed_pages");
     if (physical_write_bytes != data_program_payload_bytes +
             mapping_program_payload_bytes + gc_relocation_payload_bytes +
-            static_wear_leveling_relocation_payload_bytes) {
+            static_wear_leveling_relocation_payload_bytes +
+            refresh_relocation_payload_bytes) {
         throw std::runtime_error(
             "simulation HBF physical-write decomposition does not conserve");
     }
@@ -768,11 +780,23 @@ void write_session_hbf_accounting(
            << gc_relocation_payload_bytes
            << ",\"static_wear_leveling_relocation_payload_bytes\":"
            << static_wear_leveling_relocation_payload_bytes
+           << ",\"refresh_runs\":" << refresh_runs
+           << ",\"refresh_relocations\":" << refresh_relocations
+           << ",\"refresh_relocation_payload_bytes\":"
+           << refresh_relocation_payload_bytes
+           << ",\"refresh_reclaimed_pages\":" << refresh_reclaimed_pages
            << ",\"waf\":";
     if (host_write_bytes == 0) {
         output << "null";
     } else {
         output << static_cast<double>(physical_write_bytes) /
+            static_cast<double>(host_write_bytes);
+    }
+    output << ",\"waf_refresh\":";
+    if (host_write_bytes == 0) {
+        output << "null";
+    } else {
+        output << static_cast<double>(refresh_relocation_payload_bytes) /
             static_cast<double>(host_write_bytes);
     }
     output << ",\"waf_definition\":"
@@ -2057,8 +2081,11 @@ double write_session_stop(
               ",\"waf\":"
               "\"physical programmed payload bytes divided by host-written "
               "bytes (logical writes plus raw append-to-publish payload); "
-              "includes page rounding, mapping programs, and GC relocation, "
-              "excludes OOB/ECC/transport framing\""
+              "includes page rounding, mapping programs, GC relocation and "
+              "refresh rewrites, excludes OOB/ECC/transport framing\""
+              ",\"waf_refresh\":\"refresh relocation payload bytes divided by "
+              "the same host-written denominator; separated from the GC share "
+              "so read-driven write amplification stays visible\""
               ",\"wear_scope\":"
               "\"observed replay-window writes and block erase distribution; "
               "lifetime requires an explicit P/E-cycle and sustained-write-rate "

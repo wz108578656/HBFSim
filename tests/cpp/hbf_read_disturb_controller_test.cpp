@@ -134,6 +134,9 @@ void hot_blocks_are_rewritten_when_enabled() {
     check(device.stats().refresh_relocations + device.stats().refresh_reclaimed_pages ==
               device.stats().refresh_runs * 8,
           "refresh page accounting does not conserve the rewritten blocks");
+    check(device.stats().waf_refresh().has_value() && *device.stats().waf_refresh() > 0.0,
+          "refresh write amplification must be reported separately from GC");
+    check(device.stats().waf_gc().has_value(), "the GC share must stay reportable");
 
     auto disabled = config(1);
     disabled.host.logical_capacity_bytes = 48 * 4096;
@@ -145,6 +148,8 @@ void hot_blocks_are_rewritten_when_enabled() {
         for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(quiet, Op::Write, lpn, now); now += 1'000.0; }
     }
     check(quiet.stats().refresh_runs == 0, "a disabled refresh policy must not rewrite blocks");
+    check(!quiet.stats().waf_refresh().has_value() || *quiet.stats().waf_refresh() == 0.0,
+          "a disabled policy must not report refresh write amplification");
 }
 
 void a_read_reports_its_block_health() {
