@@ -4568,6 +4568,8 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
 
         double finish_ns = issued_ns;
         std::uint64_t media_pages = 0;
+        // Worst block health among the pages actually sensed by this request.
+        std::uint8_t block_health = 0;
         std::uint64_t read_buffer_pages = 0;
         std::uint64_t write_buffer_pages = 0;
         std::uint64_t erased_pages = 0;
@@ -4955,6 +4957,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                 schedule_read_page(*ppn, page_ready_ns, out.breakdown, trace_spans,
                     TransactionSource::User, request.heatmap_source, ReadPayloadRoute::External,
                     device_bytes, &decoded_ready_ns, true);
+            block_health = std::max(block_health, media_->read_health(*ppn));
             complete_page(page_finish);
             // The decoded page becomes cacheable when SRAM fill completes,
             // independently of how long its user's HBIO egress waits.
@@ -4969,6 +4972,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
         // dissipated at the pacing budget for the complete admitted request.
         finish_ns = std::max(finish_ns, thermal_budget_finish_ns);
         out.finish_ns = finish_ns;
+        out.block_health = block_health;
         if (write_buffer_pages > 0 && (media_pages > 0 || read_buffer_pages > 0)) {
             out.note = "mapped-read-with-write-buffer-overlay";
         } else if (write_buffer_pages > 0) {

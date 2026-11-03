@@ -58,6 +58,9 @@ public:
     // True once the block has induced more read disturb than the product
     // threshold allows. A zero threshold disables the check.
     [[nodiscard]] bool block_read_count_exceeds_threshold(std::uint64_t block) const;
+    // Health code a read of this page reports: 0 when the check is disabled,
+    // 0x1 when the block read count exceeded the threshold, 0x2 otherwise.
+    [[nodiscard]] std::uint8_t read_health(std::uint64_t ppn) const;
     // Age of the oldest data in the block, zero when it holds no data or when
     // the caller asks before the first program finished.
     [[nodiscard]] double block_retention_age_ns(std::uint64_t block, double now_ns) const;

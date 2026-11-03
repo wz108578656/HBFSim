@@ -38,11 +38,16 @@ HbfConfig config(std::uint64_t threshold) {
     return c;
 }
 
-double issue(Device& device, Op op, std::uint64_t lpn, double now,
-             std::uint64_t bytes = 4096, std::uint64_t offset = 0) {
+PhysicalCompletion complete(Device& device, Op op, std::uint64_t lpn, double now,
+                            std::uint64_t bytes = 4096, std::uint64_t offset = 0) {
     return device.issue(PhysicalRequest{.id = "read-disturb", .tier = Tier::HBF, .op = op,
         .address_space = AddressSpace::Logical, .arrival_ns = now,
-        .addr = lpn * 4096 + offset, .bytes = bytes}).finish_ns;
+        .addr = lpn * 4096 + offset, .bytes = bytes});
+}
+
+double issue(Device& device, Op op, std::uint64_t lpn, double now,
+             std::uint64_t bytes = 4096, std::uint64_t offset = 0) {
+    return complete(device, op, lpn, now, bytes, offset).finish_ns;
 }
 
 // Senses recorded by the device, summed over every block. The test does not
@@ -108,6 +113,24 @@ void a_program_starts_the_retention_clock() {
           "the programmed block must age from its program completion");
 }
 
+void a_read_reports_its_block_health() {
+    Device disabled(config(0));
+    issue(disabled, Op::Write, 0, 0.0);
+    const auto quiet = complete(disabled, Op::Read, 0, 10'000.0);
+    check(quiet.block_health == 0, "a disabled threshold must not report block health");
+
+    Device enabled(config(1));
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn) issue(enabled, Op::Write, lpn, 0.0);
+    bool saw_healthy = false, saw_over = false;
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn) {
+        const auto completion = complete(enabled, Op::Read, lpn, 10'000.0 + lpn * 1'000.0);
+        saw_healthy = saw_healthy || completion.block_health == 0x2;
+        saw_over = saw_over || completion.block_health == 0x1;
+    }
+    check(saw_healthy, "a read below the threshold must report 0x2");
+    check(saw_over, "a read above the threshold must report 0x1");
+}
+
 void threshold_reports_health_only_when_configured() {
     Device disabled(config(0));
     issue(disabled, Op::Write, 0, 0.0);
@@ -130,6 +153,7 @@ int main() {
         a_program_starts_the_retention_clock();
         a_second_page_of_the_same_block_adds_one();
         threshold_reports_health_only_when_configured();
+        a_read_reports_its_block_health();
     } catch (const std::exception& error) {
         std::cerr << "hbf_read_disturb_controller: " << error.what() << '\n';
         return 1;

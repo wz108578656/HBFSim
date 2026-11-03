@@ -197,6 +197,12 @@ struct PhysicalCompletion {
     double finish_ns = 0.0;
     std::uint64_t logical_bytes = 0;
     std::uint64_t physical_bytes = 0;
+    // OCP p59-61 block health carried by a read: 0 = not reported (the block
+    // health check is disabled), 0x1 = the block's read count exceeded
+    // Max_Read_Threshold, 0x2 = within health. The standard rides this on a
+    // CECC/UECC error response; this model has no ECC failure stage, so it
+    // annotates a successful read instead of turning it into an error.
+    std::uint8_t block_health = 0;
     std::string resource_path{};
     std::string note{};
     Breakdown breakdown{};

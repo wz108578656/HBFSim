@@ -193,6 +193,11 @@ std::uint64_t HbfDevice::block_read_count(std::uint64_t block) const {
     validate_block(block);
     return blocks_.at(block).read_count;
 }
+std::uint8_t HbfDevice::read_health(std::uint64_t ppn) const {
+    validate_page(ppn);
+    if (!config_.read_count_threshold) return 0;
+    return block_read_count_exceeds_threshold(block_slot(ppn)) ? 0x1 : 0x2;
+}
 bool HbfDevice::block_read_count_exceeds_threshold(std::uint64_t block) const {
     if (!config_.read_count_threshold) return false;
     return block_read_count(block) > config_.read_count_threshold;

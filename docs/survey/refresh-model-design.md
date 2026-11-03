@@ -89,6 +89,11 @@ included from the start instead of being deferred again.
 - **Signal**: once the count exceeds the threshold the read response carries
   `0x1` in the table-12 health field; below the threshold it carries `0x2`. The
   device does not error out; it reports.
+  Deviation from the letter of the standard: OCP carries that field on a CECC or
+  UECC *error* response, because a healthy block normally answers successfully.
+  This model has no ECC failure stage, so it annotates the successful read with
+  the health code instead of inventing an error. A host policy can therefore act
+  on health without the model claiming an error it cannot justify.
 - **Action**: host policy reads the block's valid pages and programs them into a
   freshly erased block, then retires the old one. This reuses the existing read
   and program path, so refresh pays a full block read, a full block write and
@@ -125,7 +130,7 @@ direction (every published key has provenance).
 | D2 per physical block, any page | done | same counter, keyed by canonical block slot |
 | D3 threshold predicate, default disabled | done | `hbf-read-count-threshold`, `block_read_count_exceeds_threshold` |
 | D5 erase clears the count | done | `record_erase` |
-| D5 health bits `0x1`/`0x2` on the read response | todo | needs the read status path |
+| D5 health bits `0x1`/`0x2` on the read response | done | `PhysicalCompletion::block_health`, `HbfDevice::read_health` |
 | D4 retention trigger | done | `first_program_ns` per block, `hbf-retention-ns`, `block_exceeds_retention` |
 | Host rewrite policy and refresh accounting | todo | needs a policy pass plus `waf_refresh` |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
