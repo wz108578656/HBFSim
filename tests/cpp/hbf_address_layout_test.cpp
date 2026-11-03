@@ -4,6 +4,7 @@
 #include "physical/hbf/hbf_address_layout.hpp"
 
 #include <cstdint>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -110,6 +111,25 @@ void ocp_matches_section_5_7_algebra() {
     }
 }
 
+// A sequential 4 KiB stream is the mechanism behind the bandwidth difference:
+// bank_major serializes it on one sense resource per plane block range, while
+// ocp_v070 spreads it over every bank and die of the channel from the start.
+void sequential_stream_spreads_over_banks() {
+    const auto config = make_config(AddressLayout::ocp_v070, 1, 1, 2, 4, 8, 16);
+    const auto planes = std::uint64_t{4}, dies = std::uint64_t{2};
+    std::set<std::uint32_t> banks_major, banks_ocp, dies_ocp;
+    for (std::uint64_t ppn = 0; ppn < planes * dies; ++ppn) {
+        const auto major = decode_page_index(AddressLayout::bank_major, config, ppn);
+        const auto ocp = decode_page_index(AddressLayout::ocp_v070, config, ppn);
+        banks_major.insert(major.plane);
+        banks_ocp.insert(ocp.plane);
+        dies_ocp.insert(ocp.die);
+    }
+    require(banks_major.size() == 1, "bank_major should keep a sequential stream on one bank");
+    require(banks_ocp.size() == planes, "ocp_v070 should rotate the stream over every bank");
+    require(dies_ocp.size() == dies, "ocp_v070 should rotate the stream over every die");
+}
+
 // The cache and sense timelines key on global ordinals: pages in different
 // channels or dies must never collide on one bank slot.
 void global_ordinals_are_unique() {
@@ -138,6 +158,7 @@ int main() {
         ocp_puts_bank_and_die_in_the_low_bits();
         ocp_matches_section_5_7_algebra();
         global_ordinals_are_unique();
+        sequential_stream_spreads_over_banks();
     } catch (const std::exception& error) {
         std::cerr << "hbf_address_layout: " << error.what() << '\n';
         return 1;
