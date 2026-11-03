@@ -135,7 +135,7 @@ direction (every published key has provenance).
 | Refresh candidate detection, `hbf-refresh-enable` | done | `note_refresh_candidate`, `refresh_candidate_blocks()` |
 | Host rewrite action | done | `advance_refresh`, `RelocationPurpose::Refresh` |
 | Refresh accounting | done | `refresh_runs`, `refresh_relocations`, `refresh_relocation_payload_bytes`, `refresh_reclaimed_pages`; conservation identities extended |
-| Die-level exclusion during refresh | todo | needs the per-die gate the note describes |
+| Die-level exclusion during refresh | approximated | refresh reads and programs contend on the same per-die sequencer and per-bank sense timelines as user traffic, so no separate gate is introduced; a real product also fences the whole die for the duration, which this transaction model cannot place in time |
 | `waf_refresh` in the reported summary | done | `HbfStats::waf_gc`/`waf_refresh`, session accounting JSON, client conservation check |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
 
