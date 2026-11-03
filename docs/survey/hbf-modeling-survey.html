@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlashLabAE/HBFSim 简介 · 语言 · SystemC 接入可行性 · 框架结构</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#161a24; --panel2:#1c2230; --line:#2a3245;
+    --text:#e6e9f0; --muted:#9aa4b8; --accent:#6ea8fe; --accent2:#7ee0b8;
+    --warn:#f2c14e; --bad:#f2748c; --code:#0b0e14;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0d1016,#0f1117 240px);color:var(--text);
+       font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       line-height:1.7;font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:56px 28px 96px}
+  header{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
+  h1{margin:0 0 10px;font-size:30px;letter-spacing:.2px}
+  h1 small{display:block;font-size:15px;font-weight:400;color:var(--muted);margin-top:8px;letter-spacing:0}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{font-size:12.5px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;
+        color:var(--muted);background:var(--panel)}
+  .chip b{color:var(--text);font-weight:600}
+  .chip.ok{border-color:#2f5c4b;color:#a8e6cc}
+  .chip.no{border-color:#5c2f3a;color:#f4aab8}
+  h2{margin:52px 0 14px;font-size:21px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{margin:28px 0 10px;font-size:16.5px;color:#cfd6e6}
+  p{margin:10px 0;color:#cdd4e2}
+  .muted{color:var(--muted)}
+  .lead{font-size:16px;color:#dbe1ee}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h3{margin-top:0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;letter-spacing:.3px;text-transform:none}
+  tbody tr:hover{background:#1a1f2b}
+  td.num{font-variant-numeric:tabular-nums;font-family:var(--mono);white-space:nowrap}
+  code{font-family:var(--mono);font-size:13px;background:#1b2130;padding:2px 6px;border-radius:5px;color:#cfe3ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:16px;
+      overflow:auto;font-size:12.8px;line-height:1.6}
+  pre code{background:none;padding:0;color:#c9d6ea}
+  .k{color:#8ab4f8}.c{color:#6b7a93}.s{color:#9ee6b8}.t{color:#f2c14e}
+  figure{margin:20px 0 8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  figcaption{color:var(--muted);font-size:13px;margin-top:10px;text-align:center}
+  svg{display:block;width:100%;height:auto}
+  .verdict{display:flex;gap:14px;align-items:flex-start;background:#141b26;border:1px solid #2b3a52;
+           border-left:3px solid var(--accent);border-radius:10px;padding:14px 18px;margin:18px 0}
+  .verdict strong{color:#fff}
+  .tag{display:inline-block;font-size:12px;padding:1px 7px;border-radius:5px;font-family:var(--mono)}
+  .tag.a{background:#1e3a2f;color:#8fe0b5}
+  .tag.b{background:#25324d;color:#9fc0ff}
+  .tag.c{background:#3a2c1e;color:#f0c584}
+  ul{margin:10px 0 10px 22px;padding:0;color:#cdd4e2}
+  li{margin:6px 0}
+  .toc{margin:32px 0 8px;padding:16px 20px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .toc strong{font-size:13px;color:var(--muted);letter-spacing:.4px}
+  .toc ol{margin:10px 0 0 20px;padding:0;columns:2;column-gap:28px}
+  @media(max-width:820px){.toc ol{columns:1}}
+  .toc li{margin:5px 0;color:#cdd4e2}
+  .toc li span{color:var(--muted);font-size:12.5px;margin-left:8px}
+  .toc a{color:#cfe3ff}
+  .foot{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .src{font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>FlashLabAE / HBFSim
+    <small>面向 OCP HBF v0.7.0 的开源 HBF 系统级性能模拟器 —— 简介、语言栈、SystemC 接入可行性与框架结构</small>
+  </h1>
+  <div class="chips">
+    <span class="chip">语言 <b>C++20</b>（核心）+ <b>Python 3.10+</b>（前门）</span>
+    <span class="chip">许可 <b>MIT</b></span>
+    <span class="chip">规格基准 <b>OCP HBF v0.7.0</b>（2026-08-03）</span>
+    <span class="chip">构建 <b>CMake ≥ 3.20</b>（Ninja 可选）</span>
+    <span class="chip no">SystemC 依赖：<b>无</b></span>
+    <span class="chip ok">可作为库 <b>hbfsim_core</b> 嵌入</span>
+  </div>
+</header>
+
+
+<nav class="toc">
+  <strong>目录</strong>
+  <ol>
+    <li><a href="#s1">它是什么</a><span>定位与边界</span></li>
+    <li><a href="#s2">语言与技术栈</a><span>C++20 / Python 前门 / 构建产物</span></li>
+    <li><a href="#s3">框架结构图</a><span>前门 → 协议 → 引擎 → 主机/物理模型</span></li>
+    <li><a href="#s4">设备内部结构</a><span>层次、每层日历、一次读的路径</span></li>
+    <li><a href="#s5">与 OCP 规范的差距审计</a><span>逐条差距 + 补齐优先级</span></li>
+    <li><a href="#systemc">能否接入 SystemC</a><span>三条路径与四个坑</span></li>
+    <li><a href="#s7">关键参数与默认值</a><span>Grade、时序、几何</span></li>
+    <li><a href="#s8">实测表现</a><span>grade × tR 对拍</span></li>
+    <li><a href="#s9">参考</a><span>仓库、论文、本地文档</span></li>
+  </ol>
+</nav>
+
+<h2 id="s1">1. 它是什么</h2>
+<p class="lead">一句话：<strong>HBFSim 是一个因果（causal）的事件驱动内存系统模拟器</strong>，把 HBM、HBF（按 OCP HBF v0.7.0 建模）、两者之间的链路、以及外部 backing 存储，放进<strong>同一个仿真系统</strong>里，同时给出时序、容量、放置、数据搬运、映射、GC、写放大与寿命。</p>
+
+<div class="grid2">
+  <div class="card">
+    <h3>它建模什么</h3>
+    <ul>
+      <li><strong>HBF 设备内部结构</strong>：独立通道、命令/收/发三条日历，raw channel、ECC、TSV、decoded SRAM、page buffer 各自有限的带宽日历</li>
+      <li><strong>NAND 介质</strong>：4 KiB 页、每 bank 两个 decoded 页槽（LRU）、每 block 的 program-order 与 P/E 计数、page-0 自动擦除</li>
+      <li><strong>主机侧</strong>：host-managed FTL（全驻留 / 缓存 / block / 压缩策略）、写缓冲、GC、磨损均衡、zone 管理、持久化镜像</li>
+      <li><strong>物理约束</strong>：UCIe/AXI 接口带宽（Grade 1/2/3）、封装热模型（OCP §9.1–9.2 四档热节流）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>它不做什么（明确边界）</h3>
+    <ul>
+      <li>不是电气级 / flit 级模型：无 UCIe CRC、无 packet framing、无重放</li>
+      <li>无 scratchpad SRAM 写路径、无 batch-read sense-round、无 per-AXI-ID 响应队列</li>
+      <li>不做完整协议一致性验证（它是性能模型，不是 UVM/DUT）</li>
+      <li>不含设备端 GC / copyback（按 OCP §11.4 由主机负责）</li>
+      <li>不做 GPU 指令级仿真（那是 <a href="https://github.com/SlugLab/HBFSim">SlugLab/HBFSim</a> 和 Accel-Sim 路线的分工）</li>
+    </ul>
+  </div>
+</div>
+
+
+<h3>1.1 同类开源方案在 GitHub 上的位置</h3>
+<table>
+  <thead><tr><th>仓库</th><th>License</th><th>形态</th><th>定位</th><th>在本 survey 中的用途</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/FlashLabAE/HBFSim">FlashLabAE/HBFSim</a></td>
+      <td>MIT</td>
+      <td>C++20 事件驱动 + Python 前门</td>
+      <td>按 OCP HBF v0.7.0 建模的设备级模型，含主机 FTL / GC / 磨损 / 热</td>
+      <td><strong>本文档主角</strong>：结构、参数、SystemC 接入、差距审计都基于它</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/litao1991/hbfsim">litao1991/hbfsim</a></td>
+      <td>无 LICENSE 文件</td>
+      <td>C++20 单线程 DES，trace 驱动</td>
+      <td>设备语义最接近规范：AXI 端口与 ID 保序、4 KiB DLU 累积、batch read、可靠性</td>
+      <td>结构借鉴对象；但 ns 级整数时间粒度导致栈级吞吐封顶 64 GB/s，数值不可直接使用</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/SlugLab/HBFSim">SlugLab/HBFSim</a></td>
+      <td>Apache-2.0</td>
+      <td>PTX 改写注入真实 GPU</td>
+      <td>端到端系统评估（真实 LLM 推理 + HBF 时序/容量/封装热）</td>
+      <td>只用于对照"系统闭环"路线；不提供 OCP 设备内部结构</td>
+    </tr>
+    <tr>
+      <td>HBF-Sim（<a href="https://arxiv.org/abs/2609.29246">arXiv 2609.29246</a>，ECNU）</td>
+      <td>论文称开源，未见公开仓库</td>
+      <td>Accel-Sim / GPGPU-Sim 扩展</td>
+      <td>MSHR 页合并 + 多栈 flash manager，打通 GPU 发射到 NAND 行为</td>
+      <td>仅作方法参考；代码不可得</td>
+    </tr>
+  </tbody>
+</table>
+<p class="muted">结论：GitHub 上能直接提供"带宽 + 时延 + 内部结构"的有 FlashLabAE 与 litao1991 两个设备级模型；<strong>没有任何 SystemC / TLM 的 HBF 设备模型</strong>（接入分析见 <a href="#systemc">第 6 节</a>）。</p>
+
+<h2 id="s2">2. 语言与技术栈</h2>
+<table>
+  <thead><tr><th>层</th><th>语言 / 技术</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>仿真内核</td><td><strong>C++20</strong></td><td>两个可执行程序 + 三个库目标；无第三方运行时依赖，只用标准库</td></tr>
+    <tr><td>前门 / 实验编排</td><td><strong>Python ≥ 3.10</strong>（零第三方包）</td><td><code>python3 -m hbfsim</code>：doctor / build / run / sweep / show / list；<code>open_session()</code> 给策略作者用</td></tr>
+    <tr><td>构建</td><td>CMake ≥ 3.20，Ninja 可选，GCC 13 / Clang 18 / Apple Clang 15 均已测试</td><td>CI 带 GitHub Actions badge</td></tr>
+    <tr><td>进程间协议</td><td>行式文本协议（stdin/stdout）+ JSON 行响应</td><td><code>BEGIN &lt;batch_id&gt; &lt;logical_sha&gt; &lt;trace_sha&gt; …</code> / <code>END &lt;batch_id&gt;</code> / <code>QUIT</code></td></tr>
+    <tr><td>SystemC / TLM</td><td><strong>完全没有</strong></td><td>在 <code>src/ cmake/ CMakeLists.txt</code> 中 <code>systemc / sc_module / sc_core / tlm_generic_payload / tlm_utils</code> 全部零命中</td></tr>
+  </tbody>
+</table>
+
+<h3>代码规模（本仓库实测）</h3>
+<table>
+  <thead><tr><th>目录</th><th>职责</th><th>规模</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/app/</code></td><td><code>hbfsim</code> 引擎 CLI、<code>hbfsim-reference</code>、会话协议、系统配置</td><td class="num">≈ 13.2k 行</td></tr>
+    <tr><td><code>src/host/</code></td><td>主机侧 HBF 控制器：映射、写缓冲、GC、磨损、zone、持久化镜像</td><td class="num">≈ 20.3k 行</td></tr>
+    <tr><td><code>src/physical/</code></td><td>无语义设备与链路；其中 <code>hbf/</code> 子目录（设备模型本体）</td><td class="num">≈ 10.1k 行（hbf 828 行）</td></tr>
+    <tr><td><code>src/policies/</code></td><td>可选策略支撑 + 参考放置策略</td><td class="num">≈ 7.6k 行</td></tr>
+    <tr><td><code>hbfsim/</code> + <code>hbfsim_client/</code></td><td>Python 前门 + 无语义事务协议客户端</td><td class="num">Python</td></tr>
+    <tr><td><code>verification/</code> + <code>evidence/</code></td><td>独立 oracle、门禁检查、外部模拟器对拍与硬件测量依据</td><td class="num">—</td></tr>
+  </tbody>
+</table>
+
+<h3>构建产物</h3>
+<table>
+  <thead><tr><th>目标</th><th>类型</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>hbfsim_core</code></td><td>静态/普通库</td><td>设备 + 主机 + 链路 + 热模型。包含 <code>src/physical/hbf/hbf_device.cpp</code>、<code>src/physical/resource_calendar.cpp</code>、<code>src/host/*.cpp</code> 等 <strong>19 个 .cpp</strong></td></tr>
+    <tr><td><code>hbfsim_policy_support</code> / <code>hbfsim_reference_policies</code></td><td>库</td><td>策略公共设施、参考放置策略（<code>behavioral_tiering / direct / layer_streaming</code>）</td></tr>
+    <tr><td><code>hbfsim_engine_app</code></td><td>库</td><td>引擎应用层（会话协议 + 主流程）</td></tr>
+    <tr><td><code>hbfsim</code></td><td>可执行</td><td>物理仿真会话：从 stdin 吃任意事务 DAG，不持有场景 ID</td></tr>
+    <tr><td><code>hbfsim_reference</code></td><td>可执行</td><td>跑参考策略套件（all-hbm / all-hbf / flat / direct-read / hbf-streaming …）</td></tr>
+    <tr><td><code>physical_probe</code> 等</td><td>可执行</td><td>可观测性探针、账本探针、外部标定探针</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s3">3. 框架结构图</h2>
+
+<figure>
+<svg viewBox="0 0 1000 676" role="img" aria-label="HBFSim 框架结构图">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5f7392"/>
+    </marker>
+    <style>
+      .box{fill:#1b2130;stroke:#33405a;stroke-width:1.2;rx:8}
+      .box2{fill:#18202e;stroke:#2c3a52;stroke-width:1.2}
+      .hdr{fill:#0e1420;stroke:#2c3a52;stroke-width:1}
+      .t{fill:#e6e9f0;font:13px system-ui,sans-serif}
+      .ts{fill:#9aa4b8;font:11.5px system-ui,sans-serif}
+      .tm{fill:#9fc0ff;font:11.5px ui-monospace,monospace}
+      .ln{stroke:#5f7392;stroke-width:1.2;fill:none;marker-end:url(#ar)}
+      .lnn{stroke:#5f7392;stroke-width:1.2;fill:none;stroke-dasharray:5 4}
+      .lbl{fill:#8fa0bb;font:11px ui-monospace,monospace}
+    </style>
+  </defs>
+
+  <!-- workloads -->
+  <rect x="20" y="14" width="960" height="64" class="box"/>
+  <text x="36" y="38" class="t">工作负载层</text>
+  <text x="36" y="58" class="ts">trace CSV / 合成负载（workloads/）</text>
+  <rect x="330" y="26" width="180" height="40" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="420" y="51" text-anchor="middle" class="ts">ServeLoop（外部仓库，LLM serving）</text>
+  <rect x="530" y="26" width="190" height="40" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="625" y="51" text-anchor="middle" class="ts">Python session / 自定义策略</text>
+  <rect x="740" y="26" width="220" height="40" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="850" y="51" text-anchor="middle" class="ts">examples/ 脚本（每个都是 CTest）</text>
+
+  <!-- front door -->
+  <rect x="20" y="100" width="470" height="88" class="box"/>
+  <text x="36" y="124" class="t">Python 前门：python3 -m hbfsim</text>
+  <text x="36" y="146" class="ts">doctor · build · run · sweep · show · list</text>
+  <text x="36" y="166" class="ts">open_session(system, overlays, options) → SimulationSession</text>
+
+  <rect x="510" y="100" width="470" height="88" class="box"/>
+  <text x="526" y="124" class="t">客户端协议层：hbfsim_client/</text>
+  <text x="526" y="146" class="ts">Transaction / Batch · transaction_protocol.py</text>
+  <text x="526" y="166" class="ts">目标：HBF_LOGICAL · HBF_PHYSICAL · HBM · D2D_* · EXTERNAL …</text>
+
+  <path class="ln" d="M255 164 L255 196"/>
+  <path class="ln" d="M745 164 L745 196"/>
+
+  <!-- process boundary -->
+  <line x1="20" y1="204" x2="980" y2="204" stroke="#7a5cff" stroke-width="1.4" stroke-dasharray="7 5" opacity=".85"/>
+  <text x="30" y="199" class="lbl">进程边界 · 行式协议: BEGIN &lt;batch&gt; &lt;sha&gt; … / END &lt;batch&gt; / QUIT  ·  JSON 行响应</text>
+
+  <!-- engine -->
+  <rect x="20" y="216" width="960" height="80" class="box"/>
+  <text x="36" y="240" class="t">引擎：build/hbfsim（hbfsim_engine_app）</text>
+  <rect x="330" y="226" width="200" height="34" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="430" y="248" text-anchor="middle" class="ts">src/app/session_protocol.cpp</text>
+  <rect x="550" y="226" width="200" height="34" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="650" y="248" text-anchor="middle" class="ts">src/physical/simulation_session.cpp</text>
+  <rect x="770" y="226" width="190" height="34" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="865" y="248" text-anchor="middle" class="ts">事件循环 / 因果水位</text>
+  <text x="36" y="278" class="ts">hbfsim-reference：参考策略套件回放（all-hbm / all-hbf / flat / direct-read / hbf-streaming）</text>
+
+  <path class="ln" d="M500 296 L500 330"/>
+
+  <!-- host model -->
+  <rect x="20" y="336" width="470" height="120" class="box"/>
+  <text x="36" y="360" class="t">主机模型：src/host/</text>
+  <text x="36" y="382" class="ts">hbf_controller · 映射策略（全驻留/缓存/block/压缩）</text>
+  <text x="36" y="402" class="ts">写缓冲与累积 · GC 与磨损均衡 · zone / endurance</text>
+  <text x="36" y="422" class="ts">持久化镜像 · peer memory（控制器 DRAM 预算在 HBM 顶部预留）</text>
+  <text x="36" y="442" class="ts">职责：LPN→PPN、分配、copy、寿命；不碰 NAND 时序</text>
+
+  <!-- physical model -->
+  <rect x="510" y="336" width="470" height="120" class="box"/>
+  <text x="526" y="360" class="t">物理模型：src/physical/</text>
+  <text x="526" y="382" class="ts">hbf/hbf_device.cpp：物理页面→通道/Die/Bank 映射，program-order，PEC</text>
+  <text x="526" y="402" class="ts">resource_calendar.cpp：command / rx / tx / raw / ECC / TSV / SRAM 有限日历</text>
+  <text x="526" y="422" class="ts">hbm/hbm_device.cpp · base_die_link.cpp · package_thermal.cpp</text>
+  <text x="526" y="442" class="ts">external/：CXL-SSD / NVMe / LPDDR 等 backing 设备</text>
+
+  <path class="ln" d="M490 396 L510 396"/>
+
+  <path class="ln" d="M255 456 L255 492"/>
+  <path class="ln" d="M745 456 L745 492"/>
+
+  <!-- outputs -->
+  <rect x="20" y="498" width="470" height="86" class="box"/>
+  <text x="36" y="522" class="t">输出与可复现性</text>
+  <text x="36" y="544" class="ts">summary.json / CSV · 每次运行记录 source revision、配置、可执行文件哈希</text>
+  <text x="36" y="564" class="ts">reports/ 对比与时间线看板 · evidence/ 外部模拟器 pin 与硬件测量</text>
+
+  <rect x="510" y="498" width="470" height="86" class="box"/>
+  <text x="526" y="522" class="t">验证体系（CI 门禁）</text>
+  <text x="526" y="544" class="ts">verification/gates：hbf_public_spec · analytical · mutation · fuzz · provenance</text>
+  <text x="526" y="564" class="ts">verification/oracles：独立参考模型；evidence 支撑 calibrated overlay</text>
+
+  <!-- configs -->
+  <rect x="20" y="600" width="960" height="44" class="box"/>
+  <text x="36" y="624" class="ts">配置层（53 个 .cfg）：configs/systems（硬件剖面） · configs/overlays（ocp-v070-grade1|2|3、mapping、frontend、thermal…）</text>
+  <text x="36" y="643" class="ts">configs/parameter-provenance.json：每个物理参数的证据等级与来源；结论可追溯到具体参数，而不是一句"模型假设"。</text>
+</svg>
+<figcaption>HBFSim 分层框架：Python 前门只做编排；真正的模型在 <code>hbfsim_core</code> 库里，进程边界处是行式事务协议。</figcaption>
+</figure>
+
+<h3>三个关键设计点</h3>
+<ul>
+  <li><strong>前门不建模</strong>：<code>python3 -m hbfsim</code> 只负责编译、找配置、把事务喂给 <code>build/hbfsim</code>；每个结果目录都记录真实命令行，方便复现。</li>
+  <li><strong>主机与物理解耦</strong>：<code>HbfController</code> = 主机管理 + 物理流水线；<code>HbfDevice</code> 只有通道传输、program-order、完成可见性与 decoded 页缓存，<strong>不含 L2P / 分配器 / GC</strong>。所以你可以只取物理层。</li>
+  <li><strong>证据驱动</strong>：<code>configs/parameter-provenance.json</code> 记录每个物理参数的出处与证据等级；规范里 96/192 与 94/188 GB/s 的冲突被显式保留为未决项，而不是悄悄选一个。</li>
+</ul>
+
+
+<h2 id="s4">4. 设备内部结构：层次与数据通路</h2>
+<p class="lead">HBFSim 对 HBF 的"结构"建模可以概括成一句话：<strong>层次是"Stack → Channel → Die → Plane/Bank → Block → Page"，而每一层都挂着一到数条有限带宽的"日历"</strong>——请求沿层次下行，每一级都在自己的日历上排队，总延迟就是各级 <code>start/finish</code> 串起来的结果。</p>
+
+<h3>4.1 层次与对外接口</h3>
+<figure>
+<svg viewBox="0 0 1000 880" role="img" aria-label="HBFSim 建模的 HBF 设备层次">
+  <defs>
+    <marker id="ar_s2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5f7392"/>
+    </marker>
+    <style>
+      .box{fill:#1b2130;stroke:#33405a;stroke-width:1.2}
+      .t{fill:#e6e9f0;font:13px system-ui,sans-serif}
+      .ts{fill:#9aa4b8;font:11.5px system-ui,sans-serif}
+      .ln{stroke:#5f7392;stroke-width:1.2;fill:none;marker-end:url(#ar_s2)}
+      .lbl{fill:#8fa0bb;font:11px ui-monospace,monospace}
+    </style>
+  </defs>
+
+  <!-- host -->
+  <rect x="20" y="12" width="960" height="52" rx="8" fill="#16241f" stroke="#2f6b52" stroke-width="1.2"/>
+  <text x="36" y="34" class="t">Host xPU / GPU</text>
+  <text x="36" y="53" class="ts">AXI manager · ARID / AWID 14 bit · WDATA 512 bit · 同 ID 保序、异 ID 可乱序</text>
+
+  <path class="ln" d="M500 64 L500 92"/>
+  <text x="512" y="84" class="lbl">AXI over UCIe</text>
+
+  <!-- stack container -->
+  <rect x="20" y="96" width="960" height="600" rx="10" fill="#121722" stroke="#3a4a6b" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="36" y="118" class="t" style="fill:#9fc0ff">HBF Stack（每个 stack 一个集总 RC 热节点，四档热节流）</text>
+
+  <!-- ucie -->
+  <rect x="44" y="130" width="912" height="58" rx="8" fill="#1b2130" stroke="#33405a"/>
+  <text x="60" y="152" class="t">UCIe-A 模块</text>
+  <text x="60" y="171" class="ts">每通道一条独立全双工链路 · x64 · 8 / 16 / 32 GT/s · 75% AXI 效率只算一次 → Grade 1/2/3 = 48 / 96 / 192 GB/s 每通道</text>
+
+  <path class="ln" d="M500 188 L500 212"/>
+
+  <!-- channel container -->
+  <rect x="44" y="214" width="912" height="466" rx="9" fill="#151c2b" stroke="#3f5175" stroke-width="1.3"/>
+  <text x="60" y="236" class="t" style="fill:#9fc0ff">Host Channel × 8（Grade 1）/ × 16（Grade 2、3）</text>
+  <text x="60" y="254" class="ts">通道之间完全独立：一个通道的任何资源都不能服务另一个通道的页</text>
+
+  <!-- hbio -->
+  <rect x="68" y="266" width="864" height="44" rx="7" fill="#1a2030" stroke="#3a4a6b"/>
+  <text x="84" y="285" class="t">HBIO 接口日历</text>
+  <text x="84" y="302" class="ts">command · rx（host→device） · tx（device→host）三条独立日历，全双工；时长 = 字节数 / 本 Grade 每通道载荷速率</text>
+
+  <path class="ln" d="M500 310 L500 332"/>
+
+  <!-- base die controller -->
+  <rect x="68" y="334" width="864" height="76" rx="7" fill="#1b2130" stroke="#33405a"/>
+  <text x="84" y="354" class="t">Base Die Controller（每 stack 一套）</text>
+  <rect x="84" y="362" width="256" height="38" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="212" y="386" text-anchor="middle" class="ts">ingress 准入日历</text>
+  <rect x="352" y="362" width="272" height="38" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="488" y="380" text-anchor="middle" class="ts">TSV　1644 GB/s</text>
+  <text x="488" y="394" text-anchor="middle" class="ts" style="font-size:10.5px">命令地址与原始码字共享一条时间线</text>
+  <rect x="636" y="362" width="272" height="38" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="772" y="386" text-anchor="middle" class="ts">decoded SRAM　2048 GB/s</text>
+
+  <path class="ln" d="M500 410 L500 432"/>
+
+  <!-- die -->
+  <rect x="68" y="434" width="864" height="52" rx="7" fill="#1b2130" stroke="#33405a"/>
+  <text x="84" y="454" class="t">NAND Die × 1..4（每通道，硬上限 4）</text>
+  <rect x="84" y="460" width="220" height="20" rx="5" fill="#141a26" stroke="#33405a"/>
+  <text x="194" y="475" text-anchor="middle" class="ts" style="font-size:10.5px">sequencer · 每 die 4 条源队列</text>
+  <rect x="316" y="460" width="300" height="20" rx="5" fill="#141a26" stroke="#33405a"/>
+  <text x="466" y="475" text-anchor="middle" class="ts" style="font-size:10.5px">ECC issue（编解码共用端口）101.25 GB/s · 250 ns</text>
+
+  <path class="ln" d="M500 486 L500 506"/>
+
+  <!-- plane/bank -->
+  <rect x="68" y="508" width="864" height="154" rx="7" fill="#16202f" stroke="#3f5175" stroke-width="1.3"/>
+  <text x="84" y="528" class="t">Plane / Bank × ≤16（每 die）　<tspan class="ts">—— 这就是 OCP 文档里说的 bank，源码里叫 plane</tspan></text>
+
+  <rect x="84" y="540" width="404" height="42" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="98" y="558" class="ts">subarray / sense：tR 4 µs，<tspan style="fill:#f2c14e">每 bank 有序</tspan></text>
+  <text x="98" y="574" class="ts" style="font-size:10.5px">program 75 µs · erase 2 ms，不可抢占（array_barrier）</text>
+
+  <rect x="500" y="540" width="200" height="42" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="514" y="558" class="ts">media lane</text>
+  <text x="514" y="574" class="ts" style="font-size:10.5px">2048 GB/s</text>
+
+  <rect x="712" y="540" width="196" height="42" rx="6" fill="#141a26" stroke="#33405a"/>
+  <text x="726" y="558" class="ts">page buffer bank × 2</text>
+  <text x="726" y="574" class="ts" style="font-size:10.5px">2048 GB/s</text>
+
+  <rect x="84" y="590" width="404" height="58" rx="6" fill="#1e2a22" stroke="#37805e"/>
+  <text x="98" y="608" class="ts" style="fill:#a8e6cc">decoded 页槽 × 2（LRU）</text>
+  <text x="98" y="625" class="ts" style="font-size:10.5px">命中直接回数据；第三页可驱逐已有页</text>
+  <text x="98" y="641" class="ts" style="font-size:10.5px">in-flight 填充不会被"提前"当成命中</text>
+
+  <rect x="500" y="590" width="408" height="58" rx="6" fill="#1b2130" stroke="#33405a"/>
+  <text x="514" y="608" class="ts">Block 状态：program-order + PEC</text>
+  <text x="514" y="625" class="ts" style="font-size:10.5px">每 block 顺序编程、跳页报错、page-0 自动擦除</text>
+  <text x="514" y="641" class="ts" style="font-size:10.5px">block × 2048 / plane，page × 256 / block</text>
+
+  <path class="ln" d="M500 662 L500 704"/>
+
+  <!-- page -->
+  <rect x="248" y="706" width="504" height="46" rx="7" fill="#1b2130" stroke="#33405a"/>
+  <text x="500" y="726" text-anchor="middle" class="t">NAND Page　4 KiB 数据 + 224 B OOB</text>
+  <text x="500" y="743" text-anchor="middle" class="ts">OOB 只走内部原始通路与 ECC，不算进主机载荷</text>
+
+  <!-- side: base die link -->
+  <path d="M932 372 H988 V800 H984" fill="none" stroke="#5c4a2f" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar_s2)"/>
+  <rect x="700" y="770" width="280" height="88" rx="7" fill="#1a1f2b" stroke="#5c4a2f" stroke-width="1.2"/>
+  <text x="714" y="790" class="t" style="fill:#f0c584">Base-die link ↔ HBM</text>
+  <text x="714" y="808" class="ts" style="font-size:10.5px">4hbm-4hbf 剖面：read 2048 / write 512 GB/s</text>
+  <text x="714" y="824" class="ts" style="font-size:10.5px">承载 L2P 映射表、写缓冲、GC 元数据</text>
+  <text x="714" y="842" class="ts" style="font-size:10.5px">（结构体默认值是 512 / 128 GB/s）</text>
+
+  <!-- address decomposition -->
+  <rect x="20" y="770" width="660" height="88" rx="7" fill="#141a26" stroke="#33405a"/>
+  <text x="36" y="790" class="t">地址分解（MSB → LSB）</text>
+  <text x="36" y="810" class="ts" style="font-family:ui-monospace,monospace">channel → die → plane/bank → block → page → byte</text>
+  <text x="36" y="828" class="ts" style="font-family:ui-monospace,monospace;font-size:10.5px">bank = ppn / (blocks_per_plane × pages_per_block)</text>
+  <text x="36" y="844" class="ts" style="font-family:ui-monospace,monospace;font-size:10.5px">channel = bank / (planes_per_die × dies_per_channel)</text>
+</svg>
+<figcaption>层次与对外接口：主机侧只看到"每通道一段连续逻辑地址"，通道内由 Base die 把本地地址映射到 Die / Plane(Bank) / Block / Page。</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>层</th><th>数量 / 参数</th><th>代码位置</th></tr></thead>
+  <tbody>
+    <tr><td>Host xPU</td><td>AXI manager，ARID/AWID 14 bit，WDATA 512 bit</td><td><code>hbfsim_client/</code> 事务协议</td></tr>
+    <tr><td>HBF Stack</td><td>每 stack 一个集总热节点（R=2.0 °C/W，C=0.3 J/°C）</td><td><code>src/physical/package_thermal.cpp</code></td></tr>
+    <tr><td>UCIe-A 模块</td><td>x64，8/16/32 GT/s，75% 效率 → 48/96/192 GB/s 每通道</td><td><code>src/physical/hbf/hbf_standard.hpp</code></td></tr>
+    <tr><td>Host Channel</td><td>G1 8 个、G2/G3 16 个；通道间不互通</td><td><code>HbfDevice::channels_</code>（command/rx/tx）</td></tr>
+    <tr><td>Base Die Controller</td><td>每 stack：ingress / TSV / SRAM（另含控制器 DRAM 写缓冲）</td><td><code>HbfController::LogicDieState</code></td></tr>
+    <tr><td>NAND Die</td><td>每通道 1..4（硬上限 4）</td><td><code>HbfDeviceConfig::dies_per_channel</code></td></tr>
+    <tr><td>Plane / Bank</td><td>每 die ≤16（= OCP 的 bank）</td><td><code>HbfController::PlaneState</code></td></tr>
+    <tr><td>Block / Page</td><td>2048 block/plane × 256 page/block × 4 KiB（+224 B OOB）</td><td><code>HbfDeviceConfig</code></td></tr>
+  </tbody>
+</table>
+
+<h3>4.2 每层挂的是哪条日历</h3>
+<table>
+  <thead><tr><th>资源</th><th>粒度 / 带宽</th><th>归属</th></tr></thead>
+  <tbody>
+    <tr><td>HBIO command / rx / tx</td><td>按 Grade 载荷速率（48/96/192 GB/s），全双工，每通道独立</td><td>每通道</td></tr>
+    <tr><td>TSV</td><td>1644 GB/s；命令地址与原始码字共享一条时间线</td><td>每 stack</td></tr>
+    <tr><td>decoded SRAM</td><td>2048 GB/s</td><td>每 stack</td></tr>
+    <tr><td>sequencer / TSU</td><td>每 die 4 条源队列，按"谁先就绪"回填，避免队头阻塞</td><td>每 die</td></tr>
+    <tr><td>ECC issue</td><td>101.25 GB/s 原始码字；编解码共用一个发起端口，响应延迟 250 ns 可与后续码字重叠</td><td>每 die</td></tr>
+    <tr><td>subarray sense</td><td>tR 4 µs，每 bank 有序；program 75 µs / erase 2 ms 不可抢占</td><td>每 bank</td></tr>
+    <tr><td>media lane / page buffer bank</td><td>各 2048 GB/s</td><td>每 bank</td></tr>
+    <tr><td>decoded 页槽</td><td>2 个，LRU；第三个页可驱逐</td><td>每 bank</td></tr>
+    <tr><td>program-order + PEC</td><td>每 block 顺序编程、跳页报错、page-0 自动擦除</td><td>每 block</td></tr>
+  </tbody>
+</table>
+
+<h3>4.3 一次 4 KiB 读穿过各层</h3>
+<figure>
+<svg viewBox="0 0 1000 442" role="img" aria-label="HBFSim 中一次 4 KiB 读的数据通路">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/>
+    </marker>
+    <style>
+      .b{fill:#1b2130;stroke:#33405a;stroke-width:1.2}
+      .x1{fill:#e6e9f0;font:12.5px system-ui,sans-serif}
+      .x2{fill:#9aa4b8;font:10.8px system-ui,sans-serif}
+      .xa{stroke:#6b82a5;stroke-width:1.2;fill:none;marker-end:url(#ar2)}
+    </style>
+  </defs>
+
+  <!-- row 1: command path -->
+  <text x="20" y="24" class="x1" style="fill:#9fc0ff">① 命令路径</text>
+  <rect x="20" y="34" width="228" height="58" class="b"/>
+  <text x="134" y="56" text-anchor="middle" class="x2">HBIO command</text>
+  <text x="134" y="73" text-anchor="middle" class="x2">通道 command 日历 · 64 B</text>
+
+  <rect x="272" y="34" width="228" height="58" class="b"/>
+  <text x="386" y="56" text-anchor="middle" class="x2">TSV（命令地址 64 B）</text>
+  <text x="386" y="73" text-anchor="middle" class="x2">每 stack 共享</text>
+
+  <rect x="524" y="34" width="228" height="58" class="b"/>
+  <text x="638" y="56" text-anchor="middle" class="x2">channel command 64 B</text>
+  <text x="638" y="73" text-anchor="middle" class="x2">101.25 GB/s</text>
+
+  <rect x="776" y="34" width="204" height="58" class="b"/>
+  <text x="878" y="56" text-anchor="middle" class="x2">sequencer / TSU</text>
+  <text x="878" y="73" text-anchor="middle" class="x2">每 die 4 条源队列</text>
+
+  <path class="xa" d="M248 63 L270 63"/>
+  <path class="xa" d="M500 63 L522 63"/>
+  <path class="xa" d="M752 63 L774 63"/>
+
+  <path class="xa" d="M878 92 L878 122 L134 122 L134 148"/>
+
+  <!-- row 2: media -->
+  <text x="20" y="140" class="x1" style="fill:#f2c14e">② 阵列</text>
+  <rect x="20" y="150" width="228" height="58" class="b"/>
+  <text x="134" y="172" text-anchor="middle" class="x2">subarray sense</text>
+  <text x="134" y="189" text-anchor="middle" class="x2">tR 4 µs · 每 bank 有序</text>
+
+  <rect x="272" y="150" width="228" height="58" class="b"/>
+  <text x="386" y="172" text-anchor="middle" class="x2">media lane</text>
+  <text x="386" y="189" text-anchor="middle" class="x2">2048 GB/s</text>
+
+  <rect x="524" y="150" width="228" height="58" class="b"/>
+  <text x="638" y="172" text-anchor="middle" class="x2">page buffer bank</text>
+  <text x="638" y="189" text-anchor="middle" class="x2">2048 GB/s</text>
+
+  <path class="xa" d="M248 179 L270 179"/>
+  <path class="xa" d="M500 179 L522 179"/>
+
+  <path class="xa" d="M638 208 L638 238 L250 238 L250 264"/>
+
+  <!-- row 3: data path -->
+  <text x="20" y="252" class="x1" style="fill:#a8e6cc">③ 内部数据通路与对外返回</text>
+  <rect x="20" y="266" width="228" height="70" class="b"/>
+  <text x="134" y="288" text-anchor="middle" class="x2">ECC decode</text>
+  <text x="134" y="305" text-anchor="middle" class="x2">per die issue · 101.25 GB/s</text>
+  <text x="134" y="321" text-anchor="middle" class="x2">延迟 250 ns</text>
+
+  <rect x="272" y="266" width="228" height="70" class="b"/>
+  <text x="386" y="288" text-anchor="middle" class="x2">decoded SRAM</text>
+  <text x="386" y="305" text-anchor="middle" class="x2">2048 GB/s</text>
+  <text x="386" y="321" text-anchor="middle" class="x2">页槽在此变成"可命中"</text>
+
+  <rect x="524" y="266" width="228" height="70" class="b"/>
+  <text x="638" y="288" text-anchor="middle" class="x2">TSV（数据）</text>
+  <text x="638" y="305" text-anchor="middle" class="x2">每 stack 共享</text>
+  <text x="638" y="321" text-anchor="middle" class="x2">与命令共用时间线</text>
+
+  <rect x="776" y="266" width="204" height="70" class="b"/>
+  <text x="878" y="288" text-anchor="middle" class="x2">HBIO tx</text>
+  <text x="878" y="305" text-anchor="middle" class="x2">通道 tx 日历</text>
+  <text x="878" y="321" text-anchor="middle" class="x2">按 Grade 48/96/192</text>
+
+  <path class="xa" d="M248 301 L270 301"/>
+  <path class="xa" d="M500 301 L522 301"/>
+  <path class="xa" d="M752 301 L774 301"/>
+
+  <path class="xa" d="M878 336 L878 376 L673 376"/>
+
+  <rect x="330" y="362" width="340" height="44" rx="7" fill="#1e2a22" stroke="#37805e"/>
+  <text x="500" y="382" text-anchor="middle" class="x2" style="fill:#a8e6cc">完成响应返回主机</text>
+  <text x="500" y="398" text-anchor="middle" class="x2" style="fill:#a8e6cc">同 AXI ID 保序，异 ID 可乱序</text>
+
+  <text x="20" y="424" class="x2" style="fill:#8fa0bb">每一级都是独立有限日历：排队 = 找该日历上最早可用的空隙；级与级之间只用 start / finish 串接，不做整周期对齐。</text>
+</svg>
+<figcaption>读路径：命令走"通道命令日历 → TSV → 通道命令"，数据回来走"阵列 → lane → page buffer → ECC → SRAM → TSV → HBIO tx"。</figcaption>
+</figure>
+
+<h3>4.4 结构图上"没有"的部分</h3>
+<p>看结构图时容易默认这些能力存在，实际都没有建模：<strong>scratchpad SRAM</strong>（规范里的可选特性）、<strong>batch-read sense 合并</strong>（多请求共用一次 tR）、<strong>per-AXI-ID 响应队列</strong>、<strong>UCIe flit / CRC / packet framing</strong>。做带宽与页级延迟评估够用；如果要做接口协议一致性或 scratchpad 场景，需要自己补。</p>
+
+
+<h2 id="s5">5. 与 OCP HBF v0.7.0 的差距审计</h2>
+<p class="lead">第 4 节是<strong>按实现画</strong>的结构；这一节是<strong>按规范逐条对</strong>的差距。依据三处：规范原文（附页码）、模型自述边界（<code>docs/reference/model.md</code>）、以及对源码的全文检索实证。</p>
+
+<p class="muted">影响等级：<span class="tag c">高</span> 会改变带宽/延迟结论　<span class="tag b">中</span> 影响特定场景或尾部行为　<span class="tag a">低</span> 主要影响协议完整性/寿命研究</p>
+
+<h3>5.1 对外接口（UCIe / AXI）</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>A1</td><td>Sideband 链路：SB 初始化、链路训练、参数交换、lane repair、带内寄存器访问（p.25-28, 63-65）</td><td><strong>未建模</strong>（<code>sideband</code> 全仓库 0 命中）</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>A2</td><td>Flit 层：Format 6 / Latency-Optimized 256B flit、packet type 与 opcode 编码（p.26-28, 78）</td><td>只有"字节数 ÷ 带宽"，无 flit 打包/解包</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>A3</td><td>CRC、replay/重传、链路错误信令（p.62, 73, 101-104）</td><td><strong>未建模</strong>（模型自述："UCIe CRC/replay and packet framing are not implemented"）</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>A4</td><td>链路初始化四阶段、retimer（p.28）</td><td>未建模</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>A5</td><td>每 UCIe 通道可配 1/2/4 个虚拟 AXI 接口，容量均分，主机自选交错（p.16, 23, 29-37, Figure 5）</td><td><strong>无 AXI 端口层</strong>：一条通道等效一条带宽</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>A6</td><td>AXI user 字段语义：<code>ARUSER[2]</code>=Batch Read、<code>ARUSER[8:6]</code>=Read Retry Stage、<code>RUSER/BUSER[5:2]</code>=CMD Status、<code>[8:6]</code>=ErrorInfo（p.41-42）</td><td>事务只区分 <code>HBF_LOGICAL / HBF_PHYSICAL / HBM / …</code> 目标，<strong>无 user 字段与状态码映射</strong></td><td><span class="tag b">中</span></td></tr>
+    <tr><td>A7</td><td>同 AXI ID 保序、异 ID 可乱序（p.42 Note 1, p.57 #5）</td><td><strong>无 per-AXI-ID 响应队列</strong>（模型自述）</td><td><span class="tag c">高</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.2 地址映射与 DLU</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>B1</td><td>本地地址低 4 bit = bank、次 2 bit = die（p.22）</td><td><strong>位序相反</strong>：<code>bank = ppn / (blocks × pages)</code>，bank 在高位、按容量整块划分（bank-major），不是规范的交错布局</td><td><span class="tag c">高</span></td></tr>
+    <tr><td>B2</td><td>4 AXI 端口 × 4KiB 交错的四种选项（p.23-24, Figure 5）</td><td>未建模</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>B3</td><td>Device Logical Unit（64B）与 p.62-63 的失败重放地址计算（R1–R5 公式）</td><td><strong>无 DLU 概念</strong>（<code>DLU</code> 0 命中）；写累积走 <code>ZONE_WRITE_BATCH</code> 的 4 KiB 缓冲</td><td><span class="tag b">中</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.3 读路径</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>C1</td><td>Batch read hint：带 hint 的读不等定时器，遇到 regular read 才成批下发（p.57-58）</td><td><strong>未建模</strong>（<code>batch_read</code> 0 命中；模型自述 "no batch sense-round mode"）</td><td><span class="tag c">高</span></td></tr>
+    <tr><td>C2</td><td>64B 粒度读、64 条命令凑 4 KiB、不跨页（p.56）</td><td>已覆盖：64B–4KiB、按页 sense、后续命中走 decoded cache</td><td><span class="tag a">已实现</span></td></tr>
+    <tr><td>C3</td><td>每 bank 两个 cache buffer、命中立即返回、第三页才驱逐（p.57 #7-8）</td><td>已实现（2 槽 LRU，含 in-flight 填充可见性）</td><td><span class="tag a">已实现</span></td></tr>
+    <tr><td>C4</td><td>读错误码：Invalid Address 0x1 / Temporary 0x2 / UECC 0x4 / CECC 0x5、Read Count 阈值（p.59-61）</td><td><strong>无 UECC/CECC 判定</strong>（<code>uecc</code>、<code>correctable</code> 0 命中），只有 erased/unmapped 错误</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>C5</td><td>读失败重试：base die 可配重试，或主机重试（p.57 #9）</td><td><strong>未建模</strong>（<code>read_retry</code> 0 命中）</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>C6</td><td>每 block 读计数用于 refresh 指示（p.19, 59, 118）</td><td>未建模（模型自述 "disturb counters … are outside this transaction model"）</td><td><span class="tag a">低</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.4 写路径</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>D1</td><td>非 posted、4 KiB 累加、首 64B 到达后限时收齐否则报错（p.58 #1-3,6）</td><td>已实现（累积 + 超时 + 重复/超额拒绝）</td><td><span class="tag a">已实现</span></td></tr>
+    <tr><td>D2</td><td>4 KiB 本地地址不可跳过/跳跃；block 内顺序编程（p.58 #4,9）</td><td>已实现（append-only，跳页报错），错误码不按规范枚举</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>D3</td><td>混合读写：读命中已累积部分返回数据，命中 pending 部分返回 0xA（p.59）</td><td><strong>部分实现</strong>：有 <code>buffered_write_read_status</code> 转发路径，但 0xA 语义未按规范建模</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>D4</td><td>程序失败 → 整 block replay（0x7），按 p.62-63 算 page-0 地址</td><td>有 replay 机制，但地址计算用模型自己的映射，非规范 R1–R5</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>D5</td><td>退役容量（0x8，粒度 block/bank/die/channel，p.62, 121）</td><td>有退役实现（retirement / validity 位），<strong>但没有错误码到主机的路径</strong></td><td><span class="tag b">中</span></td></tr>
+    <tr><td>D6</td><td>多平面编程 / cache program / suspend-resume（p.16 features 与厂商 datasheet）</td><td><strong>未建模</strong>（<code>multi_plane</code>、<code>cache_program</code> 0 命中）</td><td><span class="tag c">高</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.5 Scratchpad（规范可选特性）</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>E1</td><td>每通道可选 scratchpad SRAM，高优先级读写、64B 粒度、L3 级延迟、掉电失效、主机自管（p.16, 57-58, 66, 74）</td><td><strong>完全未实现</strong>（模型自述 "scratchpad SRAM writes … not implemented"）</td><td><span class="tag c">高</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.6 介质可靠性 / 寿命</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>F1</td><td>Bad block / 备用块管理、TSV 冗余与修复（p.19, 88）</td><td>未建模（<code>bad_block</code>、<code>redundancy</code> 0 命中）</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>F2</td><td>Retention 失效（85 °C 24 h）、read disturb、MAXPEC 限制（p.106, 118, 129）</td><td>未建模（模型自述排除）；PEC 计数本身有，作为磨损基线</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>F3</td><td>ECC 编解码</td><td>已实现：raw 带宽 + 响应延迟 + 编解码共用发起端口</td><td><span class="tag a">已实现</span></td></tr>
+    <tr><td>F4</td><td>禁止设备端 GC / copyback（p.117 §11.4）</td><td>遵守：GC、磨损、zone 全在主机侧</td><td><span class="tag a">已实现</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.7 控制 / 调试 / 热</h3>
+<table>
+  <thead><tr><th>#</th><th>规范要求</th><th>HBFSim 现状</th><th>影响</th></tr></thead>
+  <tbody>
+    <tr><td>G1</td><td>CSR/ADMIN 命令集：Set/Get Feature、Secure Erase、Get Log Page、BIST、Zone Remap、Read UCIe Errors、Reduced Capacity、Register R/W（p.43）</td><td><strong>只实现 Zone Remap</strong>，其余无</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>G2</td><td>设备状态寄存器（SPR / CSR / ISR、Immediate Readiness）、MMIO MAP（p.66）</td><td>未建模（模型自述 "Register access … not modeled"）</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>G3</td><td>IEEE 1500 / DA Port / JTAG 三个测试接口（p.86-89）</td><td>未建模；温度只"假定可经 IEEE 1500 读出"</td><td><span class="tag a">低</span></td></tr>
+    <tr><td>G4</td><td>四档热节流 + 温度传感器（p.106-108）</td><td>已实现热节流；但 9-bit 传感器编码、halt 期间维护命令、0x9 错误码、链路错误信令未建模（模型自述）</td><td><span class="tag b">中</span></td></tr>
+    <tr><td>G5</td><td>上电时序、复位时序（p.82-83）</td><td>未建模</td><td><span class="tag a">低</span></td></tr>
+  </tbody>
+</table>
+
+<h3>5.8 参数不确定性（规范本身的空洞，不是模型缺陷）</h3>
+<ul>
+  <li><strong>tR / tPROG / tERS 被规范明确推给厂商 datasheet</strong>（p.16）。模型用 4 µs / 75 µs / 2 ms 假设，并写入 <code>configs/parameter-provenance.json</code> 标注为证据不足。</li>
+  <li><strong>带宽数字自相矛盾</strong>：Table 2/4 写 96 / 192 GB/s，p.32/35 写 94 / 188 GB/s。模型选 p.16 并把冲突保留为未决项。</li>
+  <li><strong>几何与带宽不自洽</strong>：按规范"每通道 16 banks + tR=4 µs"只能得到 16.4 GB/s/通道，三种 Grade 都够不到；要成立必须假设每通道 47/94/188 个并行 sense，或 tR ≈ 1.37/0.68/0.34 µs（见第 8 节实测）。</li>
+</ul>
+
+<h3>5.9 如果要补齐，优先级怎么排</h3>
+<p>只关心<strong>带宽 / 页级延迟</strong>时，真正影响结论的是 4 条：</p>
+<ol>
+  <li><strong>C1 batch read</strong> —— 读路径延迟与带宽的主力，规范给了明确语义；</li>
+  <li><strong>D6 cache program + 多平面</strong> —— 写吞吐的翻倍级因素；</li>
+  <li><strong>E1 scratchpad</strong> —— 规范里唯一的 L3 级低延迟路径；</li>
+  <li><strong>B1 地址位序</strong> —— 把 bank/die 放到低位，让顺序流天然分散到所有 bank，这条会直接改变带宽曲线；</li>
+  <li><strong>A7 + A6 AXI ID 队列与 user 字段</strong> —— 否则开环注入会高估可并发度，batch hint 也进不来。</li>
+</ol>
+<p class="muted">前四条可以在 HBFSim 上以插件/改造方式加；B1 要同时动 <code>HbfDevice::bank_for_page</code> 与主机 striping 策略，改动最深，但对"顺序流能不能跑满带宽"影响最大。</p>
+
+<h2 id="systemc">6. 能否接入 SystemC 环境</h2>
+
+<div class="verdict">
+  <div>
+    <strong>结论：不能"直接接入"，但可以低成本接入 —— 而且比大多数自建方案省力。</strong><br>
+    HBFSim 自身零 SystemC/TLM 依赖，也没有 TLM socket；但它的物理层是<strong>普通 C++ 库（<code>hbfsim_core</code>）</strong>，且设备模型是"有限资源日历 + 显式时间参数"的对象，不是内建事件循环 —— 这两点决定了它可以被 SystemC 模块包住。
+  </div>
+</div>
+
+<h3>关键事实（为什么可行）</h3>
+<table>
+  <thead><tr><th>事实</th><th>证据</th><th>对 SystemC 接入的含义</th></tr></thead>
+  <tbody>
+    <tr><td>无 SystemC 依赖</td><td><code>src/</code>、<code>cmake/</code>、<code>CMakeLists.txt</code> 中 <code>systemc / sc_module / sc_core / tlm_*</code> 零命中</td><td>不会和你的 SystemC 版本冲突，可同进程链接</td></tr>
+    <tr><td>核心是库不是单体程序</td><td><code>cmake/Targets.cmake</code> 定义 <code>hbfsim_core</code>（19 个 .cpp，PUBLIC 暴露 <code>src</code> 头文件）</td><td>直接 <code>target_link_libraries(your_sc_model hbfsim_core)</code></td></tr>
+    <tr><td>设备 API 是"算时间"而非"跑事件"</td><td><code>HbfDevice::transfer()</code> 返回 <code>Transfer{start_ns, finish_ns, wait_ns}</code>；<code>read_ready()</code> / <code>complete_program()</code> / <code>cache_hit()</code> / <code>cache_fill()</code> 都是带显式 <code>now_ns</code> 参数</td><td>天然适合 TLM <code>b_transport</code> 的 annotation 语义，不需要改动它的时间模型</td></tr>
+    <tr><td>也有进程级协议</td><td><code>BEGIN</code>/<code>END</code>/<code>QUIT</code> 行式协议 + JSON 响应（<code>src/app/session_protocol.cpp</code>）</td><td>不想改 C++ 时，用 subprocess 协同仿真，零侵入</td></tr>
+    <tr><td>时间基准是 <code>double</code> 纳秒</td><td><code>HbfDeviceConfig</code> 全部 <code>*_ns</code> 为 double；引擎内部用 ns</td><td>需要 <code>sc_time</code> ↔ ns 的双向换算与时间量子约定（见下）</td></tr>
+  </tbody>
+</table>
+
+<h3>三种接入路径</h3>
+<figure>
+<svg viewBox="0 0 1000 330" role="img" aria-label="三种 SystemC 接入路径">
+  <defs><marker id="mk-dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/></marker></defs>
+  <defs>
+    <marker id="ar2_s4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/>
+    </marker>
+    <style>
+      .b{fill:#1b2130;stroke:#33405a;stroke-width:1.2}
+      .sc{fill:#16241f;stroke:#2f6b52;stroke-width:1.2}
+      .hb{fill:#1a2030;stroke:#3a4a6b;stroke-width:1.2}
+      .x1{fill:#e6e9f0;font:12.5px system-ui,sans-serif}
+      .x2{fill:#9aa4b8;font:11px system-ui,sans-serif}
+      .xa{stroke:#6b82a5;stroke-width:1.2;fill:none;marker-end:url(#ar2_s4)}
+      .xn{stroke:#6b82a5;stroke-width:1.1;fill:none;stroke-dasharray:4 4;marker-end:url(#mk-dash)}
+    </style>
+  </defs>
+
+  <!-- A -->
+  <text x="20" y="24" class="x1" style="fill:#8fe0b5">A · 进程级协同仿真（零改动）</text>
+  <rect x="20" y="36" width="150" height="52" class="sc"/>
+  <text x="95" y="58" text-anchor="middle" class="x2">你的 SystemC 平台</text>
+  <text x="95" y="76" text-anchor="middle" class="x2">TLM target</text>
+  <rect x="196" y="36" width="150" height="52" class="b"/>
+  <text x="271" y="58" text-anchor="middle" class="x2">代理 SC_MODULE</text>
+  <text x="271" y="76" text-anchor="middle" class="x2">subprocess + 行协议</text>
+  <rect x="372" y="36" width="150" height="52" class="hb"/>
+  <text x="447" y="58" text-anchor="middle" class="x2">build/hbfsim</text>
+  <text x="447" y="76" text-anchor="middle" class="x2">原样运行</text>
+  <path class="xa" d="M170 62 L194 62"/>
+  <path class="xn" d="M346 62 L370 62"/>
+  <text x="540" y="50" class="x2">改动量：小（只写 wrapper）</text>
+  <text x="540" y="68" class="x2">代价：IPC、批粒度、引擎自有时间轴</text>
+  <text x="540" y="86" class="x2">适合：先跑通、做对照基准</text>
+
+  <!-- B -->
+  <text x="20" y="140" class="x1" style="fill:#9fc0ff">B · 库内嵌（推荐，同进程）</text>
+  <rect x="20" y="152" width="150" height="52" class="sc"/>
+  <text x="95" y="174" text-anchor="middle" class="x2">你的 SystemC 平台</text>
+  <text x="95" y="192" text-anchor="middle" class="x2">sc_module + TLM socket</text>
+  <rect x="196" y="152" width="170" height="52" class="b"/>
+  <text x="281" y="174" text-anchor="middle" class="x2">HbfDeviceTLM : sc_module</text>
+  <text x="281" y="192" text-anchor="middle" class="x2">b_transport → ns 换算</text>
+  <rect x="392" y="152" width="170" height="52" class="hb"/>
+  <text x="477" y="174" text-anchor="middle" class="x2">hbfsim_core（静态库）</text>
+  <text x="477" y="192" text-anchor="middle" class="x2">HbfDevice / calendars</text>
+  <path class="xa" d="M170 178 L194 178"/>
+  <path class="xn" d="M366 178 L390 178"/>
+  <text x="600" y="166" class="x2">改动量：中（写 sc_module + 时间桥）</text>
+  <text x="600" y="184" class="x2">代价：需跟踪上游 API 变更</text>
+  <text x="600" y="202" class="x2">适合：要精确 AT 时序、要单进程可调试</text>
+
+  <!-- C -->
+  <text x="20" y="256" class="x1" style="color:#f0c584">C · 只借语义，自行重写</text>
+  <rect x="20" y="268" width="150" height="48" class="sc"/>
+  <text x="95" y="288" text-anchor="middle" class="x2">你的 SystemC 平台</text>
+  <text x="95" y="306" text-anchor="middle" class="x2">自研 HBF 设备模型</text>
+  <rect x="196" y="268" width="170" height="48" class="b"/>
+  <text x="281" y="288" text-anchor="middle" class="x2">参照：参数表 /provenance</text>
+  <text x="281" y="306" text-anchor="middle" class="x2">资源日历与 page 缓存语义</text>
+  <path class="xa" d="M170 292 L194 292"/>
+  <text x="400" y="284" class="x2">改动量：大（等于重写）</text>
+  <text x="400" y="302" class="x2">适合：模型要与官方实现完全解耦、或需要 flit 级</text>
+</svg>
+<figcaption>推荐顺序：先用 A 做对照基准，再用 B 做正式集成；C 只在你需要 flit 级或完全自主可控时选。</figcaption>
+</figure>
+
+<h3>路径 B 的代码骨架</h3>
+<pre><code><span class="c">// 1) CMake：把上游当库链接（不 fork、不改它的源码）</span>
+add_subdirectory(third_party/HBFSim)          <span class="c"># 或 find_library(hbfsim_core)</span>
+target_link_libraries(your_sc_model PRIVATE hbfsim_core)
+target_compile_features(your_sc_model PRIVATE cxx_std_20)
+
+<span class="c">// 2) SystemC 侧：TLM-2.0 target 包住 HbfDevice</span>
+<span class="k">struct</span> HbfDeviceTLM : sc_module {
+  tlm_utils::simple_target_socket&lt;HbfDeviceTLM&gt; socket;
+  hbfsim::physical::hbf::HbfDevice device;      <span class="c">// 纯 C++ 对象，非 sc_module</span>
+  <span class="k">static constexpr</span> <span class="k">double</span> NS_PER_PS = 1e-3;
+
+  SC_CTOR(HbfDeviceTLM) : socket(<span class="s">"socket"</span>), device(cfg) {
+    socket.register_b_transport(<span class="k">this</span>, &amp;HbfDeviceTLM::b_transport);
+  }
+
+  <span class="k">void</span> b_transport(tlm::tlm_generic_payload&amp; gp, sc_core::sc_time&amp; delay) {
+    <span class="k">const double</span> now_ns  = delay.to_default_time_units();      <span class="c">// 与本模型时间基对齐</span>
+    <span class="k">const double</span> pages   = <span class="k">double</span>(gp.get_data_length()) / 4096.0;
+    <span class="k">const auto</span> ch = device.channel_for_page(gp.get_address() / 4096);
+    <span class="k">const auto</span> t  = device.transfer(ch, Direction::DeviceToHost, gp.get_data_length(),
+                                     now_ns, now_ns);          <span class="c">// 返回 start/finish/wait</span>
+    delay += sc_core::sc_time(t.finish_ns - now_ns, sc_core::SC_NS);
+    gp.set_response_status(tlm::TLM_OK_RESPONSE);
+  }
+};</code></pre>
+
+<h3>接入时必须处理的 4 个细节</h3>
+<table>
+  <thead><tr><th>问题</th><th>建议做法</th></tr></thead>
+  <tbody>
+    <tr><td><strong>时间基</strong></td><td>SystemC 用 <code>sc_time</code>（建议 time resolution 设 1 ps），HBFSim 用 <code>double</code> ns。只在边界换算，内部保持各自单位，避免累积舍入。</td></tr>
+    <tr><td><strong>粒度</strong></td><td>HBFSim 是页/突发粒度（4 KiB 页、64 B 对齐 burst）。若你的 TLM 是 cache-line 粒度（64 B），有两种选择：上层聚合到 4 KiB（推荐，符合 HBF 语义），或保留 64 B 但按页号聚合 sense。</td></tr>
+    <tr><td><strong>主机层要不要</strong></td><td>只做设备性能模型：直接 <code>HbfDevice</code>（无 L2P/GC）。要做端到端：链接 <code>HbfController</code> 或整个 <code>simulation_session</code>，但后者自带事件循环，会和 SystemC 的调度器打架 —— 这时应选路径 A。</td></tr>
+    <tr><td><strong>因果水位</strong></td><td><code>transfer()</code> 与 <code>advance_cache()</code> 带 <code>causal_watermark_ns</code> 参数。SystemC 侧要保证"已提交事务的最小时间"单调推进，否则缓存填充/完成的可见性会不真实。</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7">7. 关键参数与默认值</h2>
+
+<h3>速率等级（p.16 Table 2/4，AXI 75% 效率只应用一次）</h3>
+<table>
+  <thead><tr><th>Grade</th><th>最大通道 / Die</th><th>lane 速率</th><th>每通道净荷</th><th>每栈净荷</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td class="num">8 / 8</td><td class="num">8 GT/s ×64</td><td class="num">48 GB/s</td><td class="num">384 GB/s</td></tr>
+    <tr><td>2</td><td class="num">16 / 16</td><td class="num">16 GT/s ×64</td><td class="num">96 GB/s</td><td class="num">1536 GB/s</td></tr>
+    <tr><td>3</td><td class="num">16 / 16</td><td class="num">32 GT/s ×64</td><td class="num">192 GB/s</td><td class="num">3072 GB/s</td></tr>
+  </tbody>
+</table>
+
+<h3>设备与介质默认值</h3>
+<table>
+  <thead><tr><th>参数</th><th>默认</th><th>备注</th></tr></thead>
+  <tbody>
+    <tr><td>页大小 / burst 对齐</td><td class="num">4096 B / 64 B</td><td>OCP 强制</td></tr>
+    <tr><td>每 bank decoded 页槽</td><td class="num">2</td><td>LRU，可被第三页驱逐</td></tr>
+    <tr><td>几何硬上限</td><td class="num">dies/ch ≤ 4，planes/die ≤ 16</td><td>单通道最多 64 个 sense 单元</td></tr>
+    <tr><td>tR（页读）</td><td class="num">4000 ns</td><td>研究假设，非常规范值</td></tr>
+    <tr><td>tPROG（含内部校验）</td><td class="num">75 000 ns</td><td>同上</td></tr>
+    <tr><td>tERS（块擦除）</td><td class="num">2 000 000 ns</td><td>同上</td></tr>
+    <tr><td>ECC 编/解码延迟</td><td class="num">250 ns / 250 ns</td><td>流水线吞吐与响应延迟分开建模</td></tr>
+    <tr><td>ECC / channel 原始带宽</td><td class="num">101.25 GB/s per die</td><td>≈96 GB/s 净荷（含 224 B OOB/页）；Grade 3 需抬到 ≥202.5</td></tr>
+    <tr><td>TSV 带宽</td><td class="num">1644 GB/s</td><td>命令与原始码字共享一条时间线</td></tr>
+    <tr><td>热模型</td><td>默认关闭（开启会改变完成时间）</td><td>四档：Normal / Light / Severe / Shutdown，节流靠延后下发而非改 tR</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s8">8. 实测表现（本地对拍，tR 扫描）</h2>
+<table>
+  <thead><tr><th>Grade</th><th>规格 每通道</th><th>banks/ch</th><th>tR=4 µs</th><th>tR=2 µs</th><th>tR=1 µs</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td class="num">48 GB/s</td><td class="num">16</td><td class="num">16.38</td><td class="num">32.77</td><td class="num"><b>48.0</b></td></tr>
+    <tr><td>2</td><td class="num">96 GB/s</td><td class="num">64</td><td class="num">65.56</td><td class="num"><b>96.0</b></td><td class="num">96.0</td></tr>
+    <tr><td>3</td><td class="num">192 GB/s</td><td class="num">64</td><td class="num">65.55</td><td class="num">96.02</td><td class="num">96.02</td></tr>
+    <tr><td>3（内部通路抬到 304）</td><td class="num">192 GB/s</td><td class="num">64</td><td class="num">–</td><td class="num">–</td><td class="num"><b>187.05</b></td></tr>
+  </tbody>
+</table>
+<p class="muted">稳态值与解析式 <code>banks_per_channel × 4 KiB / tR</code> 逐位吻合；Grade 3 的 96 GB/s 天花板来自默认内部通路 101.25 GB/s 原始码字，不是接口也不是阵列。冷页读延迟 4.44–4.51 µs（tR=4 µs），同页缓存命中 131–196 ns。</p>
+
+<h2 id="s9">9. 参考</h2>
+<ul>
+  <li>仓库：<a href="https://github.com/FlashLabAE/HBFSim">github.com/FlashLabAE/HBFSim</a>（MIT）</li>
+  <li>论文：<a href="https://arxiv.org/abs/2610.23503">HBFSim: A Simulator for Exploring HBF in Memory Hierarchies for LLMs</a>（arXiv:2610.23503, 2026-10）</li>
+  <li>规格：OCP High Bandwidth Flash (HBF) Specification v0.7.0 FINAL，2026-08-03，130 页</li>
+  <li>本地文档：<span class="src">docs/reference/model.md · docs/project-layout.md · configs/parameter-provenance.json · configs/README.md</span></li>
+  <li>同域对照：<a href="https://github.com/SlugLab/HBFSim">SlugLab/HBFSim</a>（PTX 注入真实 GPU，Apache-2.0）、<a href="https://github.com/litao1991/hbfsim">litao1991/hbfsim</a>（设备语义参考，无 LICENSE）</li>
+</ul>
+
+<div class="foot">
+  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-02。
+  文中"无 SystemC 依赖"为对该检出 <span class="src">src/ · cmake/ · CMakeLists.txt</span> 的全文检索结果。
+</div>
+
+</div>
+</body>
+</html>
