@@ -905,6 +905,8 @@ public:
     // Read-only view of the physical device. Verification probes need the
     // per-block read-disturb counters, which stay device state.
     [[nodiscard]] const physical::hbf::HbfDevice& media_device() const { return *media_; }
+    // Number of physical blocks currently waiting for a refresh action.
+    [[nodiscard]] std::size_t refresh_candidate_blocks() const;
     [[nodiscard]] const HbfConfig& config() const { return config_; }
     // Diagnostic only: reconstruct distinct valid pages at a modeled instant.
     // Never called on the production per-request fast path.
@@ -1703,6 +1705,9 @@ private:
     using GcCandidateKey = std::pair<std::uint32_t, std::size_t>;
     using GcCandidateBucket = std::set<GcCandidateKey>;
     std::vector<std::vector<GcCandidateBucket>> gc_candidates_by_stack_;
+    // Blocks whose read count or data age reached a refresh trigger, per
+    // stack. Detection only: the rewrite action is not implemented yet.
+    std::vector<std::set<std::size_t>> refresh_candidates_by_stack_;
     std::vector<std::vector<std::size_t>> gc_dirty_blocks_by_stack_;
     std::vector<std::map<std::uint32_t, std::uint64_t>> managed_wear_by_stack_;
     std::vector<bool> gc_active_by_stack_;
@@ -2058,6 +2063,7 @@ private:
     // Layout-agnostic inverses: the host FTL reasons in (block, page) but the
     // address layout decides which physical page a pair names.
     [[nodiscard]] std::size_t block_index_for_ppn(std::uint64_t ppn) const;
+    void note_refresh_candidate(std::uint64_t ppn, double now_ns);
     [[nodiscard]] std::uint32_t page_in_block_for_ppn(std::uint64_t ppn) const;
     [[nodiscard]] std::uint64_t ppn_for_block_page(std::size_t block_index, std::uint32_t page) const;
     [[nodiscard]] std::size_t block_plane_index(std::size_t block_index) const;

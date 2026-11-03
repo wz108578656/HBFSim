@@ -209,6 +209,10 @@ struct HbfHostConfig {
     // the GC victim. See HbfController::derive_logical_capacity_pages.
     std::uint64_t logical_capacity_bytes = 0;
     bool auto_gc_enabled = true;
+    // R1 refresh policy. Detection is on when enabled; the rewrite action is
+    // not implemented yet, so this flag only maintains the candidate set a
+    // later policy step will consume. See docs/survey/refresh-model-design.md.
+    bool refresh_enabled = false;
     // Preventive GC starts (one paced relocation step per host page write)
     // once the pages the foreground can still allocate drop to this value.
     // 0 selects pages_per_block.

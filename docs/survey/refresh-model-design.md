@@ -132,7 +132,8 @@ direction (every published key has provenance).
 | D5 erase clears the count | done | `record_erase` |
 | D5 health bits `0x1`/`0x2` on the read response | done | `PhysicalCompletion::block_health`, `HbfDevice::read_health` |
 | D4 retention trigger | done | `first_program_ns` per block, `hbf-retention-ns`, `block_exceeds_retention` |
-| Host rewrite policy and refresh accounting | todo | needs a policy pass plus `waf_refresh` |
+| Refresh candidate detection, `hbf-refresh-enable` | done | `note_refresh_candidate`, `refresh_candidate_blocks()` |
+| Host rewrite action and refresh accounting | todo | reuse `start_relocation` with a refresh purpose plus `waf_refresh` |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
 
 Tests: `hbf_read_disturb` (device arithmetic for both layouts: per-sense

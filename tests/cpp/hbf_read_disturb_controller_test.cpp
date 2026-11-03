@@ -131,6 +131,24 @@ void a_read_reports_its_block_health() {
     check(saw_over, "a read above the threshold must report 0x1");
 }
 
+void refresh_detection_tracks_hot_blocks() {
+    auto passive = config(1);
+    passive.host.refresh_enabled = false;
+    Device off(passive);
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn) issue(off, Op::Write, lpn, 0.0);
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn)
+        issue(off, Op::Read, lpn, 10'000.0 + lpn * 1'000.0);
+    check(off.refresh_candidate_blocks() == 0, "a disabled refresh policy must not track candidates");
+
+    auto active = config(1);
+    active.host.refresh_enabled = true;
+    Device on(active);
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn) issue(on, Op::Write, lpn, 0.0);
+    for (std::uint64_t lpn = 0; lpn < 4; ++lpn)
+        issue(on, Op::Read, lpn, 10'000.0 + lpn * 1'000.0);
+    check(on.refresh_candidate_blocks() > 0, "hot blocks must become refresh candidates");
+}
+
 void threshold_reports_health_only_when_configured() {
     Device disabled(config(0));
     issue(disabled, Op::Write, 0, 0.0);
@@ -154,6 +172,7 @@ int main() {
         a_second_page_of_the_same_block_adds_one();
         threshold_reports_health_only_when_configured();
         a_read_reports_its_block_health();
+        refresh_detection_tracks_hot_blocks();
     } catch (const std::exception& error) {
         std::cerr << "hbf_read_disturb_controller: " << error.what() << '\n';
         return 1;

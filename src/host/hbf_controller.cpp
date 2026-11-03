@@ -1200,6 +1200,7 @@ HbfController::HbfController(HbfConfig config, AddressHeatmap* address_heatmap)
     }
     media_->configure_host_zones(config_.host.zone_size_blocks);
     gc_candidates_by_stack_.resize(config_.device.stacks);
+    refresh_candidates_by_stack_.resize(config_.device.stacks);
     gc_dirty_blocks_by_stack_.resize(config_.device.stacks);
     managed_wear_by_stack_.resize(config_.device.stacks);
     for (std::size_t stack = 0; stack < config_.device.stacks; ++stack) {
@@ -4958,6 +4959,7 @@ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, do
                     TransactionSource::User, request.heatmap_source, ReadPayloadRoute::External,
                     device_bytes, &decoded_ready_ns, true);
             block_health = std::max(block_health, media_->read_health(*ppn));
+            note_refresh_candidate(*ppn, page_finish);
             complete_page(page_finish);
             // The decoded page becomes cacheable when SRAM fill completes,
             // independently of how long its user's HBIO egress waits.
@@ -6211,6 +6213,21 @@ std::size_t HbfController::block_index(const HbfAddress& addr) const {
     std::size_t index = plane_index(addr);
     index = index * config_.device.blocks_per_plane + addr.block;
     return index;
+}
+
+std::size_t HbfController::refresh_candidate_blocks() const {
+    std::size_t total = 0;
+    for (const auto& stack : refresh_candidates_by_stack_) total += stack.size();
+    return total;
+}
+
+void HbfController::note_refresh_candidate(std::uint64_t ppn, double now_ns) {
+    if (!config_.host.refresh_enabled) return;
+    const auto block = block_index_for_ppn(ppn);
+    const bool over_read_threshold = media_->read_health(ppn) == 0x1;
+    const bool past_retention = media_->block_exceeds_retention(block, now_ns);
+    if (!over_read_threshold && !past_retention) return;
+    refresh_candidates_by_stack_.at(stack_of_block(block)).insert(block);
 }
 
 std::size_t HbfController::block_index_for_ppn(std::uint64_t ppn) const {

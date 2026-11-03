@@ -91,6 +91,7 @@ const std::unordered_set<std::string>& owned_keys() {
         "hbf-address-layout",
         "hbf-read-count-threshold",
         "hbf-retention-ns",
+        "hbf-refresh-enable",
         "base-die-link-read-bw", "base-die-link-write-bw",
         "base-die-link-latency-ns",
         "hbf-external-direct-link-enable",
@@ -392,6 +393,10 @@ void SystemConfigBuilder::apply(std::string_view key, std::string_view value) {
 
     if (key == "hbf-processor-interconnect") {
         hbf_processor_interconnect_ = value;
+        return;
+    }
+    if (key == "hbf-refresh-enable") {
+        hbf_.host.refresh_enabled = value == "true";
         return;
     }
     if (key == "hbf-address-layout") {

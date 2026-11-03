@@ -4767,6 +4767,7 @@ void write_system_config_keys(std::ostream& out, const SystemConfig& system) {
     put("hbf-page-size", hbf.device.page_size_bytes);
     put("hbf-read-count-threshold", hbf.device.read_count_threshold);
     put("hbf-retention-ns", hbf.device.retention_ns);
+    put("hbf-refresh-enable", hbf.host.refresh_enabled ? "true" : "false");
     put("hbf-oob-bytes", hbf.device.oob_bytes_per_page);
     put("hbf-media-lanes-per-plane", hbf.device.media_lanes_per_plane);
     put("hbf-page-buffer-banks-per-plane", hbf.device.page_buffer_banks_per_plane);
