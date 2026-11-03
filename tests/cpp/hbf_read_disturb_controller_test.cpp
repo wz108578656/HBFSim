@@ -113,6 +113,40 @@ void a_program_starts_the_retention_clock() {
           "the programmed block must age from its program completion");
 }
 
+// Filling a block, sensing every page of it and then allocating more pages
+// through the paced maintenance slot must move the hot block: that is the
+// rewrite half of the refresh policy.
+void hot_blocks_are_rewritten_when_enabled() {
+    auto enabled = config(1);
+    enabled.host.refresh_enabled = true;
+    enabled.host.logical_capacity_bytes = 48 * 4096;
+    Device device(enabled);
+
+    double now = 0.0;
+    for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(device, Op::Write, lpn, now); now += 1'000.0; }
+    for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(device, Op::Read, lpn, now); now += 1'000.0; }
+    check(device.refresh_candidate_blocks() > 0, "the sensed blocks must be refresh candidates");
+    for (std::uint64_t round = 0; round < 3; ++round) {
+        for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(device, Op::Write, lpn, now); now += 1'000.0; }
+    }
+    check(device.stats().refresh_runs > 0, "the refresh policy never rewrote a candidate block");
+    check(device.stats().refresh_relocations > 0, "the refresh move relocated no page");
+    check(device.stats().refresh_relocations + device.stats().refresh_reclaimed_pages ==
+              device.stats().refresh_runs * 8,
+          "refresh page accounting does not conserve the rewritten blocks");
+
+    auto disabled = config(1);
+    disabled.host.logical_capacity_bytes = 48 * 4096;
+    Device quiet(disabled);
+    now = 0.0;
+    for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(quiet, Op::Write, lpn, now); now += 1'000.0; }
+    for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(quiet, Op::Read, lpn, now); now += 1'000.0; }
+    for (std::uint64_t round = 0; round < 3; ++round) {
+        for (std::uint64_t lpn = 0; lpn < 48; ++lpn) { issue(quiet, Op::Write, lpn, now); now += 1'000.0; }
+    }
+    check(quiet.stats().refresh_runs == 0, "a disabled refresh policy must not rewrite blocks");
+}
+
 void a_read_reports_its_block_health() {
     Device disabled(config(0));
     issue(disabled, Op::Write, 0, 0.0);
@@ -173,6 +207,7 @@ int main() {
         threshold_reports_health_only_when_configured();
         a_read_reports_its_block_health();
         refresh_detection_tracks_hot_blocks();
+        hot_blocks_are_rewritten_when_enabled();
     } catch (const std::exception& error) {
         std::cerr << "hbf_read_disturb_controller: " << error.what() << '\n';
         return 1;

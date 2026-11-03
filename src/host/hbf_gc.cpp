@@ -435,6 +435,7 @@ std::optional<std::size_t> HbfController::choose_gc_victim(std::size_t stack) {
     const auto minimum_erase_count = stack_minimum_erase_count(stack);
     const auto& active_victim = gc_victim_by_stack_.at(stack);
     const auto& migration = wear_leveling_by_stack_.at(stack);
+    const auto& refresh_victim = refresh_victim_by_stack_.at(stack);
     const auto cold_block = cold_block_by_stack_.at(stack);
     const auto count = planes_per_stack() * config_.device.blocks_per_plane;
     const auto first = stack * count;
@@ -473,7 +474,8 @@ std::optional<std::size_t> HbfController::choose_gc_victim(std::size_t stack) {
                       block.pending_program_pages != 0 || block.pending_mapping_publications != 0 ||
                       plane.active_data_block == i || plane.active_mapping_block == i ||
                       plane.active_gc_block == i || cold_block == i ||
-                      (active_victim && active_victim->block == i) || (migration && migration->block == i))) {
+                      (active_victim && active_victim->block == i) || (migration && migration->block == i) ||
+                      (refresh_victim && refresh_victim->block == i))) {
                     bucket_score = score;
                     if (!best || score > best_score || (score == best_score && rank(i) < rank(*best))) {
                         best = i; best_score = score;
@@ -522,7 +524,8 @@ std::optional<HbfController::ActiveRelocation> HbfController::start_relocation(s
     if (spans != nullptr) {
         add_trace_span(
             spans,
-            wear_leveling ? "static_wear_leveling_select" : "gc_victim_select",
+            wear_leveling ? "static_wear_leveling_select" :
+                (purpose == RelocationPurpose::Refresh ? "refresh_select" : "gc_victim_select"),
             "maintenance",
             "host/gc",
             at_ns,
@@ -818,6 +821,11 @@ std::uint32_t HbfController::relocate_live_pages(ActiveRelocation& relocation,
             stats_.static_wear_leveling_relocation_payload_bytes +=
                 config_.device.page_size_bytes;
             stats_.static_wear_leveling_relocations++;
+        } else if (relocation.purpose == RelocationPurpose::Refresh) {
+            // Read-driven rewrite traffic, kept out of the GC counters so
+            // waf_refresh can be reported separately.
+            stats_.refresh_relocation_payload_bytes += config_.device.page_size_bytes;
+            stats_.refresh_relocations++;
         } else {
             stats_.gc_relocation_payload_bytes += config_.device.page_size_bytes;
             stats_.gc_relocations++;
@@ -865,6 +873,7 @@ double HbfController::schedule_relocation_reclaim(ActiveRelocation relocation,
     PendingBlockTransition pending{
         .finish_ns = finish_ns,
         .garbage_collection = true,
+        .refresh = relocation.purpose == RelocationPurpose::Refresh,
         .static_wear_leveling = wear_leveling,
         .dependency_sequences = std::move(relocation.dependency_sequences),
         .destination_ppns = std::move(relocation.destination_ppns),
@@ -930,6 +939,12 @@ double HbfController::schedule_relocation_reclaim(ActiveRelocation relocation,
             stats_.static_wear_leveling_reclaimed_invalid_pages,
             reclaimed,
             "HBF static wear-leveling reclaimed invalid-page accounting");
+    } else if (relocation.purpose == RelocationPurpose::Refresh) {
+        stats_.refresh_runs++;
+        stats_.refresh_reclaimed_pages = checked_add(
+            stats_.refresh_reclaimed_pages,
+            reclaimed,
+            "HBF refresh reclaimed-page accounting");
     } else {
         stats_.gc_runs++;
         stats_.gc_reclaimed_invalid_pages = checked_add(
@@ -958,6 +973,63 @@ std::optional<std::size_t> HbfController::pending_gc_reclaim(std::size_t stack) 
     return earliest;
 }
 
+void HbfController::advance_refresh(double& at_ns,
+    Breakdown& breakdown,
+    std::vector<TraceSpan>* spans,
+    std::size_t stack) {
+    if (!config_.host.refresh_enabled) return;
+    // A refresh move relocates pages through the same allocator a collection
+    // uses, so never nest it inside another refresh move of the same stack.
+    // Running inside maybe_run_gc's own slot is expected: that is the paced
+    // maintenance window this policy uses. Nested allocation is already
+    // excluded by the refresh_active guard in maybe_run_gc.
+    if (refresh_active_by_stack_.at(stack)) return;
+    if (gc_victim_by_stack_.at(stack) || wear_leveling_by_stack_.at(stack)) return;
+    auto& candidates = refresh_candidates_by_stack_.at(stack);
+    auto& victim = refresh_victim_by_stack_.at(stack);
+    if (!victim) {
+        for (auto candidate = candidates.begin(); candidate != candidates.end();) {
+            const auto block_index = *candidate;
+            const auto& block = blocks_.at(block_index);
+            if (block.role == BlockRole::Free || block.erase_pending ||
+                pending_block_transitions_.contains(block_index) ||
+                block.pending_program_pages != 0 ||
+                block.pending_mapping_publications != 0 ||
+                block.free_pages != 0) {
+                // A block that was reclaimed by someone else is no longer a
+                // refresh source; a block still accumulating stays queued.
+                if (block.role == BlockRole::Free) candidate = candidates.erase(candidate);
+                else ++candidate;
+                continue;
+            }
+            double cursor = at_ns;
+            victim = start_relocation(block_index, RelocationPurpose::Refresh,
+                cursor, breakdown, spans);
+            at_ns = std::max(at_ns, cursor);
+            candidates.erase(candidate);
+            break;
+        }
+        if (!victim) return;
+    }
+    struct ActiveGuard {
+        std::vector<bool>& flags;
+        std::size_t stack;
+        ~ActiveGuard() { flags[stack] = false; }
+    } guard{refresh_active_by_stack_, stack};
+    refresh_active_by_stack_[stack] = true;
+    double cursor = at_ns;
+    const auto pace = std::min<std::uint64_t>(
+        std::max<std::uint64_t>(1, config_.host.gc_relocation_pages_per_host_write),
+        config_.device.pages_per_block);
+    (void)relocate_live_pages(*victim, cursor, breakdown, spans,
+        static_cast<std::uint32_t>(pace));
+    if (relocation_scan_complete(*victim)) {
+        (void)schedule_relocation_reclaim(*victim, cursor, breakdown, spans);
+        victim.reset();
+    }
+    at_ns = std::max(at_ns, cursor);
+}
+
 void HbfController::maybe_run_gc(double& at_ns,
     Breakdown& breakdown,
     std::vector<TraceSpan>* spans,
@@ -966,6 +1038,11 @@ void HbfController::maybe_run_gc(double& at_ns,
     BlockRole allocation_role,
     std::optional<std::size_t> preferred_plane) {
     (void)preferred_plane;
+    if (refresh_active_by_stack_.at(stack)) {
+        // Refresh relocation allocations never collect recursively, matching
+        // the GC guard below.
+        return;
+    }
     if (!config_.host.auto_gc_enabled || required_pages == 0) {
         return;
     }
@@ -1035,6 +1112,10 @@ void HbfController::maybe_run_gc(double& at_ns,
                     block_plane_index(hot_block), blocks_.at(hot_block).erase_count);
             }
             advance_static_wear_leveling(at_ns, breakdown, spans, stack);
+            // A paces refresh move rides the same allocation-driven slot as a
+            // wear-leveling migration; it only touches blocks that are closed
+            // and fully committed.
+            advance_refresh(at_ns, breakdown, spans, stack);
             headroom = gc_headroom(stack, allocation_role);
             if (headroom.foreground_pages >= hard_threshold) {
                 return;

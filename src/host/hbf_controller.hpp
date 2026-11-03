@@ -121,7 +121,8 @@ struct HbfStats {
     std::uint64_t page_reads = 0;
     // Foreground data-page programs after write-buffer coalescing. Excludes
     // mapping-page programs and every GC relocation program. Together:
-    // page_programs == data_programs + mapping_page_programs + gc_relocations.
+    // page_programs == data_programs + mapping_page_programs + gc_relocations
+    //                  + refresh_relocations.
     std::uint64_t data_programs = 0;
     std::uint64_t page_programs = 0;
     std::uint64_t block_erases = 0;
@@ -367,6 +368,12 @@ struct HbfStats {
     //   gc_relocations + gc_reclaimed_invalid_pages
     //       == gc_runs * pages_per_block
     std::uint64_t gc_data_relocations = 0;
+    // Refresh traffic: read-driven rewrites, kept apart from GC so
+    // waf_total = waf_gc + waf_refresh cannot hide either source.
+    std::uint64_t refresh_runs = 0;
+    std::uint64_t refresh_relocations = 0;
+    std::uint64_t refresh_relocation_payload_bytes = 0;
+    std::uint64_t refresh_reclaimed_pages = 0;
     std::uint64_t gc_mapping_relocations = 0;
     std::uint64_t gc_reclaimed_invalid_pages = 0;
     std::uint64_t gc_user_blocked_runs = 0;
@@ -1432,6 +1439,10 @@ private:
     enum class RelocationPurpose {
         GarbageCollection,
         StaticWearLeveling,
+        // A host refresh move: the block's data is still valid, but its read
+        // count or age crossed a trigger. Traffic is counted apart from GC so
+        // read-driven write amplification stays visible.
+        Refresh,
     };
 
     // One block whose live pages are being relocated a few at a time. Each
@@ -1529,6 +1540,8 @@ private:
         double finish_ns = 0.0;
         std::uint64_t commit_sequence = 0;
         bool garbage_collection = false;
+        // The chain was a refresh move rather than a GC victim.
+        bool refresh = false;
         // Diagnostic: the relocation chain was a static wear-leveling
         // migration of a fully valid cold block rather than a GC victim.
         bool static_wear_leveling = false;
@@ -1708,6 +1721,8 @@ private:
     // Blocks whose read count or data age reached a refresh trigger, per
     // stack. Detection only: the rewrite action is not implemented yet.
     std::vector<std::set<std::size_t>> refresh_candidates_by_stack_;
+    std::vector<std::optional<ActiveRelocation>> refresh_victim_by_stack_;
+    std::vector<bool> refresh_active_by_stack_;
     std::vector<std::vector<std::size_t>> gc_dirty_blocks_by_stack_;
     std::vector<std::map<std::uint32_t, std::uint64_t>> managed_wear_by_stack_;
     std::vector<bool> gc_active_by_stack_;
@@ -2064,6 +2079,10 @@ private:
     // address layout decides which physical page a pair names.
     [[nodiscard]] std::size_t block_index_for_ppn(std::uint64_t ppn) const;
     void note_refresh_candidate(std::uint64_t ppn, double now_ns);
+    // Advances at most one paced relocation step for a refresh candidate of
+    // this stack. No-op unless the refresh policy is enabled.
+    void advance_refresh(double& at_ns, Breakdown& breakdown,
+                         std::vector<TraceSpan>* spans, std::size_t stack);
     [[nodiscard]] std::uint32_t page_in_block_for_ppn(std::uint64_t ppn) const;
     [[nodiscard]] std::uint64_t ppn_for_block_page(std::size_t block_index, std::uint32_t page) const;
     [[nodiscard]] std::size_t block_plane_index(std::size_t block_index) const;

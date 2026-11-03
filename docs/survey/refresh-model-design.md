@@ -133,14 +133,27 @@ direction (every published key has provenance).
 | D5 health bits `0x1`/`0x2` on the read response | done | `PhysicalCompletion::block_health`, `HbfDevice::read_health` |
 | D4 retention trigger | done | `first_program_ns` per block, `hbf-retention-ns`, `block_exceeds_retention` |
 | Refresh candidate detection, `hbf-refresh-enable` | done | `note_refresh_candidate`, `refresh_candidate_blocks()` |
-| Host rewrite action and refresh accounting | todo | reuse `start_relocation` with a refresh purpose plus `waf_refresh` |
+| Host rewrite action | done | `advance_refresh`, `RelocationPurpose::Refresh` |
+| Refresh accounting | done | `refresh_runs`, `refresh_relocations`, `refresh_relocation_payload_bytes`, `refresh_reclaimed_pages`; conservation identities extended |
+| Die-level exclusion during refresh | todo | needs the per-die gate the note describes |
+| `waf_refresh` in the reported summary | todo | counters exist, reporting does not |
 | Die-level exclusion during refresh | todo | needs a per-die gate |
+
+The rewrite reuses the GC relocation machinery: a candidate block that is
+closed and fully committed is relocated by one paced step per allocation window,
+which is the same slot a wear-leveling migration uses. It never nests inside a
+GC move or another refresh move of the same stack, the allocator cannot pick the
+active refresh victim as a GC victim, and refresh programs are counted in their
+own buckets so the GC and wear-leveling conservation equations stay intact.
 
 Tests: `hbf_read_disturb` (device arithmetic for both layouts: per-sense
 counting, threshold boundary, erase reset, retention ageing from the first
 program, disabled signals), `hbf_read_disturb_controller` (one sense per page
 across cached re-reads and 64 B fragments, threshold signalling only when
-configured, the retention clock starting at a real program completion).
+configured, the retention clock starting at a real program completion, hot
+blocks rewritten when the policy is on with the refresh page identity holding,
+and nothing rewritten when it is off), `hbf_gc_layout` (reclamation relocation in
+both layouts).
 
 ## Acceptance criteria for the implementation
 

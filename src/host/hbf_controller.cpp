@@ -1201,6 +1201,8 @@ HbfController::HbfController(HbfConfig config, AddressHeatmap* address_heatmap)
     media_->configure_host_zones(config_.host.zone_size_blocks);
     gc_candidates_by_stack_.resize(config_.device.stacks);
     refresh_candidates_by_stack_.resize(config_.device.stacks);
+    refresh_active_by_stack_.assign(config_.device.stacks, false);
+    refresh_victim_by_stack_.resize(config_.device.stacks);
     gc_dirty_blocks_by_stack_.resize(config_.device.stacks);
     managed_wear_by_stack_.resize(config_.device.stacks);
     for (std::size_t stack = 0; stack < config_.device.stacks; ++stack) {
@@ -11429,7 +11431,10 @@ void HbfController::refresh_accounting_stats() const {
                 "HBF data/mapping program accounting"),
             stats_.gc_relocations,
             "HBF classified program accounting"),
-        stats_.static_wear_leveling_relocations,
+        checked_add(
+            stats_.static_wear_leveling_relocations,
+            stats_.refresh_relocations,
+            "HBF refresh program accounting"),
         "HBF wear-leveling program accounting");
     const auto classified_payload_bytes = checked_add(
         checked_add(
@@ -11439,7 +11444,10 @@ void HbfController::refresh_accounting_stats() const {
                 "HBF data/mapping payload-byte accounting"),
             stats_.gc_relocation_payload_bytes,
             "HBF classified payload-byte accounting"),
-        stats_.static_wear_leveling_relocation_payload_bytes,
+        checked_add(
+            stats_.static_wear_leveling_relocation_payload_bytes,
+            stats_.refresh_relocation_payload_bytes,
+            "HBF refresh payload-byte accounting"),
         "HBF wear-leveling payload-byte accounting");
     std::uint64_t active_gc_relocations = 0;
     std::uint64_t active_wear_relocations = 0;
@@ -11492,6 +11500,10 @@ void HbfController::refresh_accounting_stats() const {
             stats_.static_wear_leveling_relocations,
             config_.device.page_size_bytes,
             "HBF wear-leveling relocation payload-byte accounting") ||
+        stats_.refresh_relocation_payload_bytes != checked_mul(
+            stats_.refresh_relocations,
+            config_.device.page_size_bytes,
+            "HBF refresh relocation payload-byte accounting") ||
         checked_add(
             stats_.static_wear_leveling_relocations,
             stats_.static_wear_leveling_reclaimed_invalid_pages,
@@ -11536,9 +11548,12 @@ void HbfController::refresh_accounting_stats() const {
         checked_add(
             stats_.invalidations, pending_relocation_publications,
             "HBF committed/pending relocation invalidation accounting") < checked_add(
-            stats_.gc_relocations,
-            stats_.static_wear_leveling_relocations,
-            "HBF relocation invalidation accounting")) {
+            checked_add(
+                stats_.gc_relocations,
+                stats_.static_wear_leveling_relocations,
+                "HBF relocation invalidation accounting"),
+            stats_.refresh_relocations,
+            "HBF refresh invalidation accounting")) {
         throw std::runtime_error(
             "HBF GC victim, erase, or invalidation accounting diverged");
     }
