@@ -1101,6 +1101,46 @@
       "grade": "implementation_policy",
       "source": "ocp_hbf_v070",
       "notes": "Floor of the derived light budget once a package model raises a stack's effective boundary so far that no media power could hold the node at LTT. The governor then paces at the floor and the stack creeps to STT, where severe throttling takes over (section 9.2); a halt that can never lift because the environment keeps the node at or above LTT fails the simulation closed, naming the package cooling as the fault. Without a package model the floor never applies."
+    },
+    {
+      "config_keys": [
+        "hbf-read-count-threshold"
+      ],
+      "profile_value": "0 (disabled); exploratory example 100000 reads per block",
+      "unit": "reads per physical block since erase",
+      "grade": "exploratory_assumption",
+      "source": "ocp_hbf_v070",
+      "notes": "p19 requires a per-block page read counter for refresh indication and p59-61/p118 make block health a refresh trigger, but no HBF datasheet publishes Max_Read_Threshold, the counting unit or the counter width. 0 keeps the model unchanged. The design note docs/survey/refresh-model-design.md fixes the open choices (D1 counts one NAND sense per page, D2 counts each physical block a multi-plane command touches, D4 keeps the threshold flat over temperature) so the number is the only unknown a datasheet has to replace."
+    },
+    {
+      "config_keys": [
+        "hbf-retention-ns"
+      ],
+      "profile_value": "0 (disabled); exploratory example 86400000000000 ns (24 h)",
+      "unit": "ns since the block's last program",
+      "grade": "exploratory_assumption",
+      "source": "ocp_hbf_v070",
+      "notes": "p118 requires the host to refresh data at the product-published retention interval, and names 24 h powered retention at 85 C only as an operating condition, not as the interval. The interval a product must publish is unknown, so 0 disables the path. Shares the refresh policy and accounting with the read-count trigger."
+    },
+    {
+      "config_keys": [
+        "hbf-refresh-enable"
+      ],
+      "profile_value": "false",
+      "unit": "bool",
+      "grade": "implementation_policy",
+      "source": "ocp_hbf_v070",
+      "notes": "OCP 11.4 excludes device-side GC and copyback, so refresh is a host action: the device reports block health and the host decides when to rewrite the block. This switch selects that host policy. Off by default because the mechanism is not implemented yet and because enabling it must not silently change existing results."
+    },
+    {
+      "config_keys": [
+        "hbf-refresh-reserve-blocks-per-plane"
+      ],
+      "profile_value": "0",
+      "unit": "blocks per plane",
+      "grade": "implementation_policy",
+      "source": "ocp_hbf_v070",
+      "notes": "Refresh destinations compete with foreground allocation and GC headroom. Reserving free blocks per plane keeps a triggered refresh from stalling on allocation; 0 means the policy reuses the ordinary free pool. The value is a host policy choice, not a device property."
     }
   ]
 }

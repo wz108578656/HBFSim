@@ -660,15 +660,16 @@
 </ul>
 
 <h3>5.9 如果要补齐，优先级怎么排</h3>
-<p>只关心<strong>带宽 / 页级延迟</strong>时，真正影响结论的是 4 条：</p>
+<p>按"对结论的影响"排序，而不是按规范章节顺序：</p>
 <ol>
-  <li><strong>C1 batch read</strong> —— 读路径延迟与带宽的主力，规范给了明确语义；</li>
-  <li><strong>D6 cache program + 多平面</strong> —— 写吞吐的翻倍级因素；</li>
-  <li><strong>E1 scratchpad</strong> —— 规范里唯一的 L3 级低延迟路径；</li>
-  <li><strong>B1 地址位序</strong> —— 把 bank/die 放到低位，让顺序流天然分散到所有 bank，这条会直接改变带宽曲线；</li>
-  <li><strong>A7 + A6 AXI ID 队列与 user 字段</strong> —— 否则开环注入会高估可并发度，batch hint 也进不来。</li>
+  <li><strong>B1 地址位序</strong> —— <b>已实现</b>（commit <code>119c93a</code>）并已量化：顺序物理读快 15.8×、写快 16×（见 8.1）；</li>
+  <li><strong>D6 cache program + 多平面</strong> —— 多平面并行在模型里已经生效（关掉自动擦除后 64 页写 4.7 µs/页 = 75 µs ÷ 16），缺的是 cache program；</li>
+  <li><strong>C1 batch read</strong> —— 规范给了明确语义（ARUSER[2]），带提示的批量读现在会被高估；</li>
+  <li><strong>E1 scratchpad</strong> —— 规范里唯一的 L3 级低延迟路径，完全未实现；</li>
+  <li><strong>R1 刷新（read disturb + retention）</strong> —— 不影响毫秒级窗口的带宽/延迟，但决定寿命口径；五个规范空白点的默认选择与验收标准已写成设计输入：<code>docs/survey/refresh-model-design.md</code>；</li>
+  <li><strong>A6 + A7 AXI user 字段与 per-ID 队列</strong> —— 接口语义完整性，决定 batch hint 能否进来、开环注入是否高估并发。</li>
 </ol>
-<p class="muted">前四条可以在 HBFSim 上以插件/改造方式加；B1 要同时动 <code>HbfDevice::bank_for_page</code> 与主机 striping 策略，改动最深，但对"顺序流能不能跑满带宽"影响最大。</p>
+<p class="muted">前四项可以在 HBFSim 上以插件/改造方式加；B1 需要同时动设备映射与主机 FTL（已完成）；R1 要新增 per-block 计数、错误码与主机策略，但没有架构性障碍——读/写路径都是现成的。</p>
 
 <h2 id="systemc">6. 能否接入 SystemC 环境</h2>
 

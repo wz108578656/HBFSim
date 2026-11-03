@@ -45,6 +45,13 @@ not product-calibrated.
 | [Verification coverage](verification/coverage.md) | Current | Executable checks mapped to invariants |
 | [Project layout](project-layout.md) | Current | Where code, data, tests, and docs belong |
 
+## Survey and design notes
+
+| Document | Status | Purpose |
+| --- | --- | --- |
+| [HBF modeling survey](survey/hbf-modeling-survey.html) | Experimental | Single-file survey of this fork: model scope, SystemC attachment, the OCP gap audit, parameters and measured grids |
+| [R1: read-disturb refresh design input](survey/refresh-model-design.md) | Experimental | The five specification-open choices, proposed keys and acceptance criteria for the host refresh mechanism |
+
 ## Directory guides
 
 | Document | Status | Purpose |
