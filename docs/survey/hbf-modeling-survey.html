@@ -98,8 +98,9 @@
     <li><a href="#systemc">能否接入 SystemC</a><span>三条路径与四个坑</span></li>
     <li><a href="#s7">关键参数与默认值</a><span>Grade、时序、几何</span></li>
     <li><a href="#s8">实测表现</a><span>grade × tR 对拍 + 地址布局 A/B</span></li>
-    <li><a href="#s9">参考</a><span>仓库、论文、本地文档</span></li>
-    <li><a href="#s10">完成度取证</a><span>fork 当前代码重跑的验收数据</span></li>
+    <li><a href="#paths">外部 → HBF 的三条路径</a><span>计费覆盖与实测带宽</span></li>
+    <li><a href="#evidence">完成度取证</a><span>fork 当前代码重跑的验收数据</span></li>
+    <li><a href="#refs">参考</a><span>仓库、论文、本地文档</span></li>
   </ol>
 </nav>
 
@@ -855,7 +856,179 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>同一类假设在 GC / 磨损均衡里还有第二处</strong>：<code>relocate_live_pages</code> 与回收校验都用 <code>block_begin + page</code> 找块内页，在 ocp_v070 下重定位会读写错页，回收提交时直接报 “GC source page table remained live at reclaim commit”。已一并改为按布局编码，并新增 <code>hbf_gc_layout</code> 测试：回退修复该测试失败、恢复修复后通过，两层验证都留在了仓库里。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
-<h2 id="s10">10. 完成度取证（fork 当前代码重跑）</h2>
+<h2 id="paths">9. 外部 → HBF 的三条路径</h2>
+<p class="lead">模型里"外部到 HBF"有三条可测量路径，区别不在物理路线，而在<strong>一条 session 事务计了哪几段</strong>：每条事务只负责一个阶段，端到端必须用 <code>dependencies</code> 串联。</p>
+
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" role="img" aria-label="三条外部到HBF路径的拓扑与计费范围">
+  <defs>
+    <marker id="tpar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/>
+    </marker>
+    <marker id="tparg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7ee0b8"/>
+    </marker>
+    <style>
+      .box{fill:#1b2130;stroke:#33405a;stroke-width:1.2}
+      .charged{fill:#16241f;stroke:#37805e;stroke-width:1.3}
+      .excluded{fill:#1a1f2b;stroke:#5c3a3f;stroke-width:1.2;stroke-dasharray:5 4}
+      .t{fill:#e6e9f0;font:13px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .ts{fill:#9aa4b8;font:11.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .tn{fill:#8fe0b5;font:11.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .tx{fill:#f0a8b4;font:11.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .ln{stroke:#6b82a5;stroke-width:1.3;fill:none;marker-end:url(#tpar)}
+      .lng{stroke:#7ee0b8;stroke-width:1.4;fill:none;marker-end:url(#tparg)}
+      .lnx{stroke:#6b5a6a;stroke-width:1.2;fill:none;stroke-dasharray:5 4;marker-end:url(#tpar)}
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="620" fill="#0f1117"/>
+  <text x="24" y="34" class="t" style="font-size:16px">三条「外部 → HBF」路径：一条事务只计一段</text>
+  <text x="24" y="54" class="ts">绿色实线 = 计费；灰色虚线 = 不计费；实测数字来自 fork 分支 feat/ocp-v070-gaps</text>
+
+  <!-- Path A -->
+  <text x="24" y="92" class="t" style="fill:#9fc0ff">A · 主机 → HBF 设备接口（HBF_LOGICAL / HBF_PHYSICAL）</text>
+  <rect x="24" y="104" width="150" height="58" rx="7" class="box"/>
+  <text x="99" y="128" text-anchor="middle" class="ts">主机 xPU</text>
+  <text x="99" y="146" text-anchor="middle" class="ts">AXI manager</text>
+  <path class="lng" d="M174 133 L200 133"/>
+  <rect x="200" y="104" width="196" height="58" rx="7" class="charged"/>
+  <text x="298" y="126" text-anchor="middle" class="tn">HBIO 接口日历</text>
+  <text x="298" y="144" text-anchor="middle" class="ts">command · rx · tx</text>
+  <text x="298" y="158" text-anchor="middle" class="ts">48 / 96 / 192 GB/s·通道</text>
+  <path class="lng" d="M396 133 L420 133"/>
+  <rect x="420" y="104" width="186" height="58" rx="7" class="charged"/>
+  <text x="513" y="126" text-anchor="middle" class="tn">Base Die</text>
+  <text x="513" y="144" text-anchor="middle" class="ts">TSV 1644 · ECC 101.25</text>
+  <text x="513" y="158" text-anchor="middle" class="ts">SRAM 2048 · page buffer</text>
+  <path class="lng" d="M606 133 L630 133"/>
+  <rect x="630" y="104" width="196" height="58" rx="7" class="charged"/>
+  <text x="728" y="126" text-anchor="middle" class="tn">NAND 阵列</text>
+  <text x="728" y="144" text-anchor="middle" class="ts">tR 4 µs · tPROG 75 µs</text>
+  <text x="728" y="158" text-anchor="middle" class="ts">tERS 2 ms</text>
+  <text x="852" y="126" class="tn">实测</text>
+  <text x="852" y="144" class="ts">48 / 96 GB/s·通道</text>
+  <text x="852" y="158" class="ts">冷读 4.44–4.51 µs</text>
+
+  <!-- Path B -->
+  <text x="24" y="212" class="t" style="fill:#f2c14e">B · 外部 → 直连 lane（DIRECT_EXTERNAL_TO_HBF，仅传输段）</text>
+  <rect x="24" y="224" width="150" height="58" rx="7" class="excluded"/>
+  <text x="99" y="248" text-anchor="middle" class="tx">外部 backing</text>
+  <text x="99" y="266" text-anchor="middle" class="ts">CXL-SSD / NVMe / LPDDR</text>
+  <path class="lnx" d="M174 253 L200 253"/>
+  <rect x="200" y="224" width="196" height="58" rx="7" class="charged"/>
+  <text x="298" y="246" text-anchor="middle" class="tn">直连 lane（仅此段计入）</text>
+  <text x="298" y="264" text-anchor="middle" class="ts">32 GB/s · 100 ns</text>
+  <path class="lnx" d="M396 253 L420 253"/>
+  <rect x="420" y="224" width="186" height="58" rx="7" class="excluded"/>
+  <text x="513" y="246" text-anchor="middle" class="tx">HBF 落盘</text>
+  <text x="513" y="264" text-anchor="middle" class="ts">不在本条事务内</text>
+  <text x="852" y="246" class="tn">实测</text>
+  <text x="852" y="264" class="ts">31.9 GB/s（256 页）</text>
+
+  <!-- Path C -->
+  <text x="24" y="332" class="t" style="fill:#a8e6cc">C · 端到端链（EXTERNAL 读 → lane → HBF 落盘，用 dependencies 串联）</text>
+  <rect x="24" y="344" width="150" height="58" rx="7" class="charged"/>
+  <text x="99" y="368" text-anchor="middle" class="tn">① EXTERNAL 读</text>
+  <text x="99" y="386" text-anchor="middle" class="ts">36 GB/s · 75 ns 传播</text>
+  <path class="lng" d="M174 373 L200 373"/>
+  <rect x="200" y="344" width="196" height="58" rx="7" class="charged"/>
+  <text x="298" y="366" text-anchor="middle" class="tn">② lane 传输</text>
+  <text x="298" y="384" text-anchor="middle" class="ts">32 GB/s · 100 ns</text>
+  <path class="lng" d="M396 373 L420 373"/>
+  <rect x="420" y="344" width="186" height="58" rx="7" class="charged"/>
+  <text x="513" y="366" text-anchor="middle" class="tn">③ HBF program / erase</text>
+  <text x="513" y="384" text-anchor="middle" class="ts">瓶颈：75 µs / 2 ms</text>
+  <text x="852" y="366" class="tn">实测</text>
+  <text x="852" y="384" class="ts">0.744 / 0.111 GB/s</text>
+
+  <!-- conclusion -->
+  <rect x="24" y="440" width="952" height="150" rx="9" fill="#141a26" stroke="#2c3a52"/>
+  <text x="44" y="468" class="t">读图要点</text>
+  <text x="44" y="492" class="ts">· 三条路径的物理路线基本相同（B 与 C 走同一条 lane），差别在于「一条事务计了哪几段」。</text>
+  <text x="44" y="514" class="ts">· A 计满设备内部三段 → 测的是设备整体对外带宽；B 只计 lane → 测的是封装外链路；C 三段全计 → 测的是数据真正落盘的吞吐。</text>
+  <text x="44" y="536" class="ts">· 数值差两个数量级：链路 32 GB/s，端到端 0.1–0.7 GB/s。瓶颈在 NAND program/erase，不在链路。</text>
+  <text x="44" y="558" class="ts">· 端到端必须逐段发起事务并用 dependencies 串联；只发 DIRECT_* 得到的是链路带宽，不是端到端带宽。</text>
+  <text x="44" y="580" class="ts" style="fill:#6b7a93">复现脚本：fork_evidence.py（A）· ext_lane.py（B）· ext_to_hbf_chain.py（C）</text>
+</svg>
+
+<figcaption>图 9-1　三条路径的拓扑与计费范围（绿色实线计入，灰色虚线不计入）。</figcaption>
+</figure>
+
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" role="img" aria-label="三条路径计费覆盖矩阵">
+<style>.h{fill:#9aa4b8;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.c{fill:#e6e9f0;font:13px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.ok{fill:#8fe0b5;font:13px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.no{fill:#f0a8b4;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.na{fill:#5f6b80;font:13px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.m{fill:#cfe3ff;font:12px ui-monospace,Menlo,Consolas,monospace}</style>
+<rect width="1000" height="340" fill="#0f1117"/>
+<text x="24" y="30" class="c" style="font-size:15px">三条路径的计费覆盖（绿色=计入 · 红色=不计入 · 灰色=不适用）</text>
+<rect x="24" y="46" width="162" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="105.0" y="70" text-anchor="middle" class="h">路径</text>
+<rect x="194" y="46" width="142" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="265.0" y="70" text-anchor="middle" class="h">外部 backing</text>
+<rect x="344" y="46" width="132" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="410.0" y="70" text-anchor="middle" class="h">直连 lane</text>
+<rect x="484" y="46" width="178" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="573.0" y="70" text-anchor="middle" class="h">HBIO / TSV / ECC</text>
+<rect x="670" y="46" width="132" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="736.0" y="70" text-anchor="middle" class="h">NAND 阵列</text>
+<rect x="810" y="46" width="158" height="36" rx="5" fill="#161c28" stroke="#2c3a52"/>
+<text x="889.0" y="70" text-anchor="middle" class="h">实测带宽</text>
+<rect x="24" y="88" width="952" height="54" rx="6" fill="#141a26" stroke="#26324a"/>
+<text x="105.0" y="117.0" text-anchor="middle" class="c">A · 主机 → HBF</text>
+<text x="265.0" y="117.0" text-anchor="middle" class="na">—</text>
+<text x="410.0" y="117.0" text-anchor="middle" class="na">—</text>
+<text x="573.0" y="117.0" text-anchor="middle" class="ok">计入</text>
+<text x="736.0" y="117.0" text-anchor="middle" class="ok">计入</text>
+<text x="889.0" y="117.0" text-anchor="middle" class="m">48 / 96 GB/s·通道</text>
+<rect x="24" y="150" width="952" height="54" rx="6" fill="#141a26" stroke="#26324a"/>
+<text x="105.0" y="179.0" text-anchor="middle" class="c">B · 外部 → lane</text>
+<text x="265.0" y="179.0" text-anchor="middle" class="no">不计</text>
+<text x="410.0" y="179.0" text-anchor="middle" class="ok">计入</text>
+<text x="573.0" y="179.0" text-anchor="middle" class="na">—</text>
+<text x="736.0" y="179.0" text-anchor="middle" class="no">不计</text>
+<text x="889.0" y="179.0" text-anchor="middle" class="m">31.9 GB/s</text>
+<rect x="24" y="212" width="952" height="54" rx="6" fill="#141a26" stroke="#26324a"/>
+<text x="105.0" y="241.0" text-anchor="middle" class="c">C · 端到端链</text>
+<text x="265.0" y="241.0" text-anchor="middle" class="ok">计入</text>
+<text x="410.0" y="241.0" text-anchor="middle" class="ok">计入</text>
+<text x="573.0" y="241.0" text-anchor="middle" class="ok">计入</text>
+<text x="736.0" y="241.0" text-anchor="middle" class="ok">计入·瓶颈</text>
+<text x="889.0" y="241.0" text-anchor="middle" class="m">0.744 / 0.111 GB/s</text>
+<text x="24" y="300" class="h">读法：B 与 C 走同一条 lane，差别在于一条事务计了哪几段；A 计满设备内部 → 设备接口带宽；B 只计 lane → 链路带宽；C 全计 → 落盘吞吐，瓶颈在 NAND。</text>
+</svg>
+<figcaption>图 9-2　计费覆盖矩阵：行是路径，列是阶段。</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>路径</th><th>事务</th><th>计入</th><th>实测（fork <code>feat/ocp-v070-gaps</code>）</th><th>回答的问题</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>A</strong> 主机 → HBF</td>
+      <td><code>HBF_LOGICAL</code> / <code>HBF_PHYSICAL</code></td>
+      <td>HBIO 接口 + TSV/ECC/SRAM + NAND 阵列（逻辑路径再加 FTL/GC）</td>
+      <td class="num">48 / 96 GB/s·通道；冷读 4.44–4.51 µs；命中 131–196 ns</td>
+      <td>设备整体对外带宽</td>
+    </tr>
+    <tr>
+      <td><strong>B</strong> 外部 → 直连 lane</td>
+      <td><code>DIRECT_EXTERNAL_TO_HBF</code>（op=W）</td>
+      <td><strong>只有 lane 传输段</strong>（32 GB/s · 100 ns）</td>
+      <td class="num">31.9 GB/s（256 页）</td>
+      <td>封装外链路够不够快</td>
+    </tr>
+    <tr>
+      <td><strong>C</strong> 端到端链</td>
+      <td><code>EXTERNAL R</code> → <code>DIRECT W</code> → <code>HBF_PHYSICAL W</code></td>
+      <td>外部设备 + lane + HBF program/erase</td>
+      <td class="num">0.744 GB/s（预擦除）<br>0.111 GB/s（含 page-0 擦除）</td>
+      <td>数据真正落盘要多久</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>读图结论</strong>：B 与 C 走的是同一条物理 lane，差别只在事务覆盖面；A 计满设备内部，测的是设备接口能力。数值相差两个数量级（链路 32 GB/s 对端到端 0.1–0.7 GB/s），说明瓶颈在 NAND 的 program/erase，而不在封装外链路——这与 HBF"读快写慢"的定位一致。</p>
+<p class="muted">复现脚本随文档放在 <code>docs/survey/</code>：<code>fork_evidence.py</code>（路径 A）、<code>ext_lane.py</code>（路径 B）、<code>ext_to_hbf_chain.py</code>（路径 C）。B/C 路径需要 <code>hbf-external-direct-link-enable=true</code> 与 <code>enable_external=True</code>；C 还要求物理写所需的 published extent。</p>
+
+<h2 id="evidence">10. 完成度取证（fork 当前代码重跑）</h2>
 <p>以下是目标验收的重跑数据，全部在 fork 分支 <code>feat/ocp-v070-gaps</code> 的当前代码上执行（地址布局、GC/擦除修复、刷新机制均已合入），用于确认后续改动没有让既有结论回归。</p>
 
 <h3>10.1 规格带宽复现</h3>
@@ -894,7 +1067,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   <li>时序参数（tR/tPROG/tERS、内部通路带宽）是研究假设，已在 provenance 中标注证据等级。</li>
 </ul>
 
-<h2 id="s9">9. 参考</h2>
+<h2 id="refs">11. 参考</h2>
 <ul>
   <li>仓库：<a href="https://github.com/FlashLabAE/HBFSim">github.com/FlashLabAE/HBFSim</a>（MIT）</li>
   <li>论文：<a href="https://arxiv.org/abs/2610.23503">HBFSim: A Simulator for Exploring HBF in Memory Hierarchies for LLMs</a>（arXiv:2610.23503, 2026-10）</li>
@@ -904,7 +1077,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </ul>
 
 <div class="foot">
-  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-02。
+  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-04。
   文中"无 SystemC 依赖"为对该检出 <span class="src">src/ · cmake/ · CMakeLists.txt</span> 的全文检索结果。
 </div>
 
