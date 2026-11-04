@@ -1029,6 +1029,18 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p class="muted">复现脚本随文档放在 <code>docs/survey/</code>：<code>fork_evidence.py</code>（路径 A）、<code>ext_lane.py</code>（路径 B）、<code>ext_to_hbf_chain.py</code>（路径 C）。B/C 路径需要 <code>hbf-external-direct-link-enable=true</code> 与 <code>enable_external=True</code>；C 还要求物理写所需的 published extent。</p>
 
 <h3>9.1 A 与 C 的关系：同一段落盘路径的两个入口</h3>
+<p>把 C 拆开量一次，可以直接看到"差不多"的来源（预擦除块、单通道 16 plane、ocp 布局）：</p>
+<table>
+  <thead><tr><th>阶段</th><th>64 页</th><th>256 页</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>① 外部设备读（EXTERNAL）</td><td class="num">81.6 µs / 3.21 GB/s</td><td class="num">201.6 µs / 5.20 GB/s</td><td>外部设备固定延迟 + 队列，页数少时占比大</td></tr>
+    <tr><td>② 直连 lane</td><td class="num">8.3 µs / 31.61 GB/s</td><td class="num">32.9 µs / 31.90 GB/s</td><td>接近配置的 32 GB/s</td></tr>
+    <tr><td>③ HBF 物理写（= A 的写方向）</td><td class="num">301.0 µs / 0.87 GB/s</td><td class="num">1201.0 µs / 0.87 GB/s</td><td>program 75 µs/页 ÷ 16 plane</td></tr>
+    <tr><td><strong>C 端到端</strong></td><td class="num">352.3 µs / 0.74 GB/s</td><td class="num">1252.3 µs / 0.84 GB/s</td><td>③ 占 C 的 <strong>85.4%</strong>（64 页）/<strong>95.9%</strong>（256 页）</td></tr>
+  </tbody>
+</table>
+<p>所以"C 与 A 的 program 带宽看起来差不多"不是巧合：<strong>C 的带宽被 ③ 支配</strong>，① 只在页数少时占一成多，② 几乎可以忽略。想提升恢复/迁移带宽，优化外部设备或 lane 的收益很小，真正的杠杆在 ③——更多 plane/die 提高 program 并行、cache program，或降低 tPROG。</p>
+
 <p>A 和 C 不是两条并列的路，而是<strong>"共享后半段"的两条入口</strong>：</p>
 <ul>
   <li><strong>A</strong> 是主机的正常访存——入口是 UCIe/AXI（HBIO），<strong>读和写都走它</strong>；</li>
