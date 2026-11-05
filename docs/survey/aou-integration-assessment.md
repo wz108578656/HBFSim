@@ -1,6 +1,6 @@
 # AoU（AXI over UCIe）桥引入 HBFSim 的可行性评估
 
-> Status: Proposed
+> Status: Planned
 > Last reviewed: 2026-11-05
 
 ## 结论

@@ -51,6 +51,7 @@ not product-calibrated.
 | --- | --- | --- |
 | [HBF modeling survey](survey/hbf-modeling-survey.html) | Experimental | Single-file survey of this fork: model scope, SystemC attachment, the OCP gap audit, parameters and measured grids |
 | [R1: read-disturb refresh design input](survey/refresh-model-design.md) | Experimental | The five specification-open choices, proposed keys and acceptance criteria for the host refresh mechanism |
+| [AoU integration assessment](survey/aou-integration-assessment.md) | Planned | Whether the OCA AoU bridge should be pulled into the model, its measured overheads, and the four integration options |
 
 ## Directory guides
 
