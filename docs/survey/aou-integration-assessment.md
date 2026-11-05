@@ -10,7 +10,7 @@
 | A 参数校准 | 用 AoU 的公开开销/延迟数据校准 HBFSim 接口层常数，加开关与 provenance | **立即做** | 1–2 人日 |
 | B 轻量协议层 | 在 `HbfDevice` 通道日历前加一层消息/flit/credit/ID 模型（纯 C++） | **需要时做**（若要回答反压、credit、ID 上限类问题） | 1–2 人周 |
 | C Verilator 协同 | 把 `AOU_CORE_TOP` Verilate 成 C++，与 HBFSim 联仿 | 不建议现在做 | 4–6 人周，且依赖仿真器/适配 |
-| D SystemC 平台 | 用 `tt-oca-harness-model` 作 host 侧平台，HBFSim 作 TLM 目标 | 延后评估 | ≥3 人周 |
+| D SystemC 平台 | 用 `tt-oca-harness-model` 作 host 侧平台，HBFSim 作 TLM 目标 | 仅作固件联调；其 AoU 模型无时序，不能替代 B | ≥3 人周 |
 
 理由：HBF 的页级传输（4 KiB）正好落在 AoU 的高效区间；AoU 能带来的关键可量化影响是「6.25% 固定的 flit/协议开销 + 消息组成 + ~45 cycle 往返 + credit 深度约束」，这些用解析模型（B）就能回答，不需要 RTL 级仿真。HBFSim 现有 75% 效率假设与 AoU 实测同量级，**不存在数量级错误**。
 
@@ -22,6 +22,24 @@
 - 接口：AXI4 主/从 + APB3 配置 + UCIe 3.0 FDI（32/64/128 B，单/双 PHY），仅支持 UCIe 256 B Format 6 flit
 - 功能：AXI→AoU 消息打包、消息→granule→flit、credit 管理（`AOU_CRD_CTRL`）、RP（1–4 个虚拟 AXI 口）与 QoS 仲裁、位宽转换、突发拆分、early response、AXI 聚合器、FDI bringup 状态机（`AOU_TOP`）
 - 规范：[AoU Protocol Specification v0.7](https://cdn.sanity.io/files/jpb4ed5r/production/728b2f8cfc09023466cf350db53764890b4f2343.pdf)（公开 PDF）
+
+### 1.1 `tt-oca-harness-model` 里的 AoU 模型
+
+该虚拟平台仓库（Apache-2.0，C++/SystemC，约 54 MB 检出）**确实带一个 AoU 模型**：`aou/` 子系统，
+11 个文件、814 行 C++（`aou_core.h/.cpp` + 351 行单测）。但它的定位是**功能级/寄存器级**：
+
+| 项 | 内容 |
+|---|---|
+| 抽象层级 | SystemC/TLM-2.0 **loosely-timed**，无 `SC_THREAD`，`b_transport` 不调用 `wait()` |
+| 建模范围 | APB CSR（0x00–0x80：全局寄存器 + 4 RP × 6 寄存器）、activate/deactivate 握手、AXI slave→peer master 转发（`connect_peer`、`dest_rp` 选 RP）、`fdi_active_i` 绑 true、`irq_o` |
+| 时间 | 只有两个 CCI 参数：`access_delay_ns`（APB，默认 1 ns）、`bridge_delay_ns`（桥接 AXI，默认 0） |
+| **明确没有** | **FDI flit、credit、QoS 时序**（模型文档原话：*"There is no FDI flit, credit, or QoS timing."*） |
+| 平台集成 | `smc-vp` 把 APB 窗口放在 `0xC000_C000`；`smu-vp` 绑 `axi_s[0]`/`axi_m[0]` 到 SMU xbar；需要 SystemC + CCI 环境 |
+| 用途 | 固件/寄存器 bring-up、虚拟平台联调 |
+
+**结论**：这个模型不能用来回答带宽、credit 深度、QoS 或 flit 开销问题；它只提供"寄存器行为 + 转发"。
+对 HBFSim 而言，它的价值是**接口形态参考**（`aou_core` 的 APB/AXI socket 划分、CSR 布局），
+不是性能数据来源。
 
 ## 2. 关键量化数据
 
@@ -133,6 +151,8 @@ UCIe 环境下的读请求往返（RTT）约 **45 cycle**（不含远端内存�
 
 1. **RTL 处于 pre-release**：接口/寄存器可能变，不适合作为长期二进制依赖；只作为参考实现与数值来源。
 2. **UVM 验证环境依赖商业仿真器**（VCS/Xcelium 等），本机没有；C 方案的成本主要在这里。
-3. **75%（OCP）与 AoU 的 6.25%+消息组成是否重叠**：OCP 的 75% 是「AXI link layer efficiency」，AoU 的分解是「flit 组成」。两者口径不同，不能直接相乘后宣称精确值；A 方案只做敏感性与上下界。
-4. **HBF 的 AXI 用法未在 AoU 文档中覆盖**：HBF 的 64 B 粒度命令、4 KiB 页写、batch read hint、scratchpad 命令类型都是 OCP 侧约定；AoU 规范未必定义其映射，需要自行约定。
-5. **数据消息宽度选择**：HBF 应优先 1024b DLENGTH（32 条消息/页）以拿到 85.3% 而非 80.0%。
+3. **`tt-oca-harness-model` 的 AoU 模型没有时序**：参考它的接口形态可以，但性能问题（credit/flit/QoS）
+   仍需自建轻量协议层（方案 B）。
+4. **75%（OCP）与 AoU 的 6.25%+消息组成是否重叠**：OCP 的 75% 是「AXI link layer efficiency」，AoU 的分解是「flit 组成」。两者口径不同，不能直接相乘后宣称精确值；A 方案只做敏感性与上下界。
+5. **HBF 的 AXI 用法未在 AoU 文档中覆盖**：HBF 的 64 B 粒度命令、4 KiB 页写、batch read hint、scratchpad 命令类型都是 OCP 侧约定；AoU 规范未必定义其映射，需要自行约定。
+6. **数据消息宽度选择**：HBF 应优先 1024b DLENGTH（32 条消息/页）以拿到 85.3% 而非 80.0%。
