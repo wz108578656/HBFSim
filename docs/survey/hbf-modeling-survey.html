@@ -15,7 +15,8 @@
   body{margin:0;background:linear-gradient(180deg,#0d1016,#0f1117 240px);color:var(--text);
        font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
        line-height:1.7;font-size:15px}
-  .wrap{flex:1 1 auto;min-width:0;max-width:1080px;margin:0 auto;padding:48px 28px 96px}
+  .main{flex:1 1 auto;min-width:0;height:100vh;overflow-y:auto;scroll-behavior:smooth;overscroll-behavior:contain}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 96px}
   header{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
   h1{margin:0 0 10px;font-size:30px;letter-spacing:.2px}
   h1 small{display:block;font-size:15px;font-weight:400;color:var(--muted);margin-top:8px;letter-spacing:0}
@@ -60,8 +61,8 @@
   .toc li{margin:5px 0;color:#cdd4e2}
   .toc li span{color:var(--muted);font-size:12.5px;margin-left:8px}
   .toc a{color:#cfe3ff}
-  body{display:flex;align-items:flex-start}
-  .sidebar{position:sticky;top:0;flex:0 0 248px;width:248px;max-height:100vh;overflow-y:auto;
+  body{display:flex;height:100vh;overflow:hidden}
+  .sidebar{position:relative;flex:0 0 248px;width:248px;height:100vh;max-height:100vh;overflow-y:auto;
            padding:26px 14px 40px;background:#10151e;border-right:1px solid var(--line);
            font-size:13px;scrollbar-width:thin}
   .sidebar .sb-home{display:block;font-weight:700;font-size:14px;color:#e6e9f0;text-decoration:none;margin-bottom:4px}
@@ -79,11 +80,12 @@
   html{scroll-behavior:smooth}
   h2,h3{scroll-margin-top:14px}
   @media(max-width:980px){
-    body{display:block}
-    .sidebar{position:relative;width:auto;flex:1 1 auto;max-height:none;border-right:none;
+    body{display:block;height:auto;overflow:visible}
+    .sidebar{position:relative;width:auto;height:auto;max-height:none;flex:1 1 auto;border-right:none;
              border-bottom:1px solid var(--line);padding:18px 16px 14px}
     .sidebar .sb-nav > ol{columns:2;column-gap:20px}
     .sidebar .sb-nav ul{display:none}
+    .main{height:auto;overflow:visible}
   }
   .foot{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
   a{color:var(--accent);text-decoration:none}
@@ -120,6 +122,7 @@
   </ol></nav>
   <a class="sb-top" href="#">↑ 回到顶部</a>
 </aside>
+<div class="main">
 <div class="wrap">
 
 <header>
@@ -1218,22 +1221,75 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </div>
 
 </div>
+</div><!-- .main -->
 <script>
 (function () {
-  var links = Array.prototype.slice.call(document.querySelectorAll('.sidebar a[href^="#"]'));
+  var sidebar = document.querySelector('.sidebar');
+  var main = document.querySelector('.main');
+  if (!sidebar) return;
+  var links = Array.prototype.slice.call(sidebar.querySelectorAll('a[href^="#"]'));
   var byId = {};
-  links.forEach(function (a) { var id = a.getAttribute('href').slice(1); if (id) byId[id] = a; });
-  var targets = Object.keys(byId).map(function (id) { return document.getElementById(id); }).filter(Boolean);
-  if (!('IntersectionObserver' in window) || !targets.length) return;
-  var observer = new IntersectionObserver(function (entries) {
-    entries.forEach(function (entry) {
-      if (!entry.isIntersecting) return;
-      links.forEach(function (a) { a.classList.remove('active'); });
-      var active = byId[entry.target.id];
-      if (active) active.classList.add('active');
+  links.forEach(function (a) {
+    var id = a.getAttribute('href').slice(1);
+    if (id) byId[id] = a;
+  });
+
+  function mark(link) {
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (link) link.classList.add('active');
+  }
+  function scroller() { return main && main.scrollHeight > main.clientHeight ? main : null; }
+  function goTop() {
+    var box = scroller();
+    if (box) { box.scrollTo({ top: 0, behavior: 'smooth' }); }
+    else { window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  }
+  function jump(el) {
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (err) { el.scrollIntoView(true); }
+    // Some embedded viewers ignore scrollIntoView on their own pane; correct
+    // the position directly if the heading did not land near the top.
+    window.setTimeout(function () {
+      var top = el.getBoundingClientRect().top;
+      if (top < -4 || top > window.innerHeight * 0.65) {
+        var box = scroller();
+        if (box) { box.scrollTop += top - 14; }
+        else { window.scrollBy(0, top - 14); }
+      }
+    }, 420);
+  }
+
+  links.forEach(function (a) {
+    a.addEventListener('click', function (ev) {
+      var id = a.getAttribute('href').slice(1);
+      if (!id) { ev.preventDefault(); goTop(); mark(null); return; }
+      var el = document.getElementById(id);
+      if (!el) return;
+      ev.preventDefault();
+      jump(el);
+      mark(a);
+      try { history.replaceState(null, '', '#' + id); } catch (err) {}
     });
-  }, { rootMargin: '-8% 0px -82% 0px', threshold: 0 });
-  targets.forEach(function (t) { observer.observe(t); });
+  });
+
+  // A fragment in the URL should land on the same heading inside the pane.
+  if (window.location.hash.length > 1) {
+    var initial = document.getElementById(window.location.hash.slice(1));
+    if (initial) { window.setTimeout(function () { jump(initial); }, 60); }
+  }
+
+  if ('IntersectionObserver' in window) {
+    var targets = Object.keys(byId)
+      .map(function (id) { return document.getElementById(id); })
+      .filter(Boolean);
+    var box = scroller();
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) mark(byId[entry.target.id]);
+      });
+    }, { root: box, rootMargin: '-8% 0px -82% 0px', threshold: 0 });
+    targets.forEach(function (t) { observer.observe(t); });
+  }
 })();
 </script>
 </body>
