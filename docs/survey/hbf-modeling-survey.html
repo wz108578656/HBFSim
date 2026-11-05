@@ -96,7 +96,7 @@
 <body>
 <aside class="sidebar">
   <a class="sb-home" href="#">HBF 建模 survey</a>
-  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-04</div>
+  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-05</div>
   <nav class="sb-nav"><ol>
     <li><a href="#s1">1. 它是什么</a>
       <ul><li><a href="#hs1">它建模什么</a></li><li><a href="#hs2">它不做什么（明确边界）</a></li><li><a href="#s1-1">1.1 同类开源方案在 GitHub 上的位置</a></li></ul></li>
@@ -112,13 +112,15 @@
       <ul><li><a href="#hs6">关键事实（为什么可行）</a></li><li><a href="#hs7">三种接入路径</a></li><li><a href="#hs8">路径 B 的代码骨架</a></li><li><a href="#hs9">接入时必须处理的 4 个细节</a></li></ul></li>
     <li><a href="#s7">7. 关键参数与默认值</a>
       <ul><li><a href="#hs10">速率等级（p.16 Table 2/4，AXI 75% 效率只应用一次）</a></li><li><a href="#hs11">设备与介质默认值</a></li></ul></li>
-    <li><a href="#s8">8. 实测表现（本地对拍，tR 扫描）</a>
-      <ul><li><a href="#s8-1">8.1 地址布局 A/B：顺序物理访问下差 15.8 倍</a></li></ul></li>
-    <li><a href="#paths">9. 外部 → HBF 的三条路径</a>
-      <ul><li><a href="#s9-1">9.1 A 与 C 的关系：同一段落盘路径的两个入口</a></li></ul></li>
-    <li><a href="#evidence">10. 完成度取证（fork 当前代码重跑）</a>
-      <ul><li><a href="#s10-1">10.1 规格带宽复现</a></li><li><a href="#s10-2">10.2 地址布局 A/B（顺序物理访问）</a></li><li><a href="#s10-3">10.3 验证与回归</a></li><li><a href="#s10-4">10.4 已知边界（明确不宣称）</a></li></ul></li>
-    <li><a href="#refs">11. 参考</a></li>
+    <li><a href="#ftl">8. FTL 机制：映射、写缓冲、GC、磨损均衡</a>
+      <ul><li><a href="#ftl-map">8.1 地址映射（L2P）</a></li><li><a href="#ftl-write">8.2 写缓冲（DLU）</a></li><li><a href="#ftl-gc">8.3 垃圾回收（GC）</a></li><li><a href="#ftl-wl">8.4 磨损均衡（两层 + zone）</a></li><li><a href="#ftl-stats">8.5 计数与状态</a></li><li><a href="#ftl-missing">8.6 明确没有实现的</a></li><li><a href="#ftl-tests">8.7 对应测试</a></li></ul></li>
+    <li><a href="#s8">9. 实测表现（本地对拍，tR 扫描）</a>
+      <ul><li><a href="#s8-1">9.1 地址布局 A/B：顺序物理访问下差 15.8 倍</a></li></ul></li>
+    <li><a href="#paths">10. 外部 → HBF 的三条路径</a>
+      <ul><li><a href="#s9-1">10.1 A 与 C 的关系：同一段落盘路径的两个入口</a></li></ul></li>
+    <li><a href="#evidence">11. 完成度取证（fork 当前代码重跑）</a>
+      <ul><li><a href="#s10-1">11.1 规格带宽复现</a></li><li><a href="#s10-2">11.2 地址布局 A/B（顺序物理访问）</a></li><li><a href="#s10-3">11.3 验证与回归</a></li><li><a href="#s10-4">11.4 已知边界（明确不宣称）</a></li></ul></li>
+    <li><a href="#refs">12. 参考</a></li>
   </ol></nav>
   <a class="sb-top" href="#">↑ 回到顶部</a>
 </aside>
@@ -866,7 +868,86 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   </tbody>
 </table>
 
-<h2 id="s8">8. 实测表现（本地对拍，tR 扫描）</h2>
+<h2 id="ftl">8. FTL 机制：映射、写缓冲、GC、磨损均衡</h2>
+<p class="lead">HBF 的逻辑地址不会直接落到 NAND 页：主机侧控制器（<code>HbfController</code>）实现了一套完整的 FTL 栈。下面这些机制在模型里<strong>都有实现、都有配置键、都有测试</strong>——这也是"能不能拿它做 SSD/FTL 研究"的分界。末尾单列"明确没有"的部分，避免误判。</p>
+
+<h3 id="ftl-map">8.1 地址映射（L2P）</h3>
+<table>
+  <thead><tr><th>维度</th><th>可选值</th><th>配置键</th></tr></thead>
+  <tbody>
+    <tr><td>映射模式</td><td><code>FullResident</code>（映射表全驻留）/ <code>Cached</code>（缓存 + 脏表回写）/ <code>RawPhysical</code>（旁路 FTL）</td><td><code>hbf-mapping-mode</code></td></tr>
+    <tr><td>组织粒度</td><td><code>Page</code> / <code>Block</code> / <code>BlockLog</code> / <code>Extent</code> / <code>ObjectSegment</code>；结构式组织按 <strong>superblock</strong> 分配、编程、回收</td><td><code>hbf-mapping-organization</code><br><code>hbf-mapping-superblock-planes</code><br><code>hbf-mapping-log-blocks</code></td></tr>
+    <tr><td>缓存布局</td><td><code>Page</code> / <code>Entry</code> / <code>Extent</code>（extent 把连续干净映射压成仿射 run，写时提升为 dense page）</td><td><code>hbf-mapping-cache-layout</code><br><code>-cache-tag-bytes</code> / <code>-codec-ns-per-entry</code><br><code>-scratch-pages</code> / <code>-compute-workers</code></td></tr>
+    <tr><td>存放位置</td><td>系统 HBM 预留区（Host）或每 stack 设备 DRAM（DeviceLocal），共用 <code>ctrl-dram-bytes</code> 预算</td><td><code>hbf-mapping-placement</code><br><code>hbf-ctrl-dram-bytes</code></td></tr>
+    <tr><td>更新开销</td><td>25 ns/次（实现假设）</td><td><code>hbf-mapping-update-ns</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">现成 overlay：<code>configs/overlays/hbf/mapping/</code> 下 7 个（resident / page-cache / entry-cache / compressed-cache / block / block-log-striped / extent-striped）。注意映射表<strong>占用容量</strong>：带映射的 HBF 必然需要 HBM 或设备 DRAM 预算。</p>
+
+<h3 id="ftl-write">8.2 写缓冲（DLU）</h3>
+<table>
+  <thead><tr><th>机制</th><th>配置键 / 默认值</th></tr></thead>
+  <tbody>
+    <tr><td>写合并（4 KiB 页由 64 B 片段累积）</td><td><code>hbf-write-coalescing</code></td></tr>
+    <tr><td>缓冲容量</td><td><code>hbf-write-buffer-pages</code> = 1024</td></tr>
+    <tr><td>刷写阈值</td><td><code>hbf-write-buffer-flush-threshold-pages</code></td></tr>
+    <tr><td>完成语义（是否要求已刷盘）</td><td><code>hbf-write-buffer-completion-requires-flush</code></td></tr>
+    <tr><td>与 HBM 共享缓冲</td><td><code>hbf-write-buffer-shared-hbm</code></td></tr>
+    <tr><td>累积超时</td><td>1 ms（超时即刷）</td></tr>
+  </tbody>
+</table>
+
+<h3 id="ftl-gc">8.3 垃圾回收（GC）</h3>
+<table>
+  <thead><tr><th>机制</th><th>实现 / 参数</th></tr></thead>
+  <tbody>
+    <tr><td>触发水位</td><td><code>hbf-gc-low-watermark-pages</code>、<code>hbf-gc-hard-watermark-pages</code></td></tr>
+    <tr><td>预留块</td><td><code>hbf-gc-reserved-free-blocks-per-plane</code> = 2，并按"最坏受害块的迁移需求"推导 floor</td></tr>
+    <tr><td>预防性 GC</td><td><code>hbf-gc-relocation-pages-per-host-write</code> = 1，压力增大自动加速；前台可借用预留但不得低于 floor</td></tr>
+    <tr><td>受害块评分</td><td><code>invalid_pages − weight × (erase_count − stack_min_erase)</code>，weight 由 <code>hbf-gc-wear-leveling-weight</code> 给出</td></tr>
+    <tr><td>回收流程</td><td>页全部失效 → 归还空闲池 → 页零编程付擦除 2 ms；统计 <code>gc_runs</code> / <code>gc_relocations</code> / WAF</td></tr>
+  </tbody>
+</table>
+
+<h3 id="ftl-wl">8.4 磨损均衡（两层 + zone）</h3>
+<table>
+  <thead><tr><th>层</th><th>机制</th><th>参数</th></tr></thead>
+  <tbody>
+    <tr><td>① GC 内嵌</td><td>把擦除次数差折算成"无效页收益"，让 GC 倾向更磨损的块</td><td><code>hbf-gc-wear-leveling-weight</code></td></tr>
+    <tr><td rowspan="6">② 静态磨损均衡</td><td>冷块迁移触发阈值（0 = 关闭）</td><td><code>hbf-static-wear-leveling-erase-gap</code></td></tr>
+    <tr><td>冷块扫描频率（控制扫描成本）</td><td><code>…-interval-erases</code></td></tr>
+    <tr><td>晚启动：新盘不提前均衡</td><td><code>…-start-erases</code></td></tr>
+    <tr><td>迟滞：防止来回抖动</td><td><code>…-stop-gap</code></td></tr>
+    <tr><td>冷却期：刚迁移的块不立即复用</td><td><code>…-cooldown-erases</code></td></tr>
+    <tr><td>直接拷贝的写放大预算（令牌桶）</td><td><code>…-max-write-fraction</code></td></tr>
+    <tr><td>③ Zone 级重映射</td><td>按 NAND 块对齐的 zone 在主机通道内重映射，做粗粒度均衡</td><td><code>hbf-zone-size-blocks</code><br><code>hbf-host-zone-remap-ns</code><br><code>hbf-host-zone-wear-gap</code></td></tr>
+  </tbody>
+</table>
+
+<h3 id="ftl-stats">8.5 计数与状态</h3>
+<ul>
+  <li>每块 <strong>erase_count（PEC）</strong> 与全局 <code>block_erases</code>；页三态 <code>Valid / Invalid / Free</code>；</li>
+  <li>逻辑容量会扣除 GC 预留，不等于裸容量；</li>
+  <li>WAF 可分解：<code>waf_gc()</code>（GC + 磨损均衡迁移）与 <code>waf_refresh()</code>（本分支新增的读驱动刷新）分开上报；</li>
+  <li>实测：<code>all-hbf</code> 场景 WAF = <strong>3.667</strong>。</li>
+</ul>
+
+<h3 id="ftl-missing">8.6 明确没有实现的</h3>
+<table>
+  <thead><tr><th>缺失项</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>坏块管理 / spare block</td><td><code>docs/reference/model.md</code> 明确：spare/bad-block management 不在事务模型内</td></tr>
+    <tr><td>后台自主 GC 线程</td><td>GC 挂在主机分配节奏上推进，没有独立固件线程模型</td></tr>
+    <tr><td>错误注入 / 读重试 / CECC-UECC 失效</td><td>本分支加了读计数与刷新策略，但没有注入失效</td></tr>
+    <tr><td>主机 TRIM / discard 队列语义</td><td>只有显式 <code>HBF_INVALIDATE</code> 命令</td></tr>
+    <tr><td>FTL 掉电一致性（journaling）</td><td>有检查点与持久化镜像，但不是日志式恢复</td></tr>
+  </tbody>
+</table>
+
+<h3 id="ftl-tests">8.7 对应测试</h3>
+<p class="muted"><code>hbf_mapping_cache</code> · <code>hbf_mapping_layout</code> · <code>hbf_mapping_multistack</code> · <code>hbf_mapping_organization</code> · <code>hbf_mapping_placement</code> · <code>hbf_mapping_sram</code> · <code>hbf_gc_index</code> · <code>hbf_gc_reserve</code> · <code>hbf_gc_drain_parallel</code> · <code>hbf_gc_layout</code> · <code>hbf_static_wear_leveling</code> · <code>hbf_persistent_image</code>（共 12 个）</p>
+
+<h2 id="s8">9. 实测表现（本地对拍，tR 扫描）</h2>
 <table>
   <thead><tr><th>Grade</th><th>规格 每通道</th><th>banks/ch</th><th>tR=4 µs</th><th>tR=2 µs</th><th>tR=1 µs</th></tr></thead>
   <tbody>
@@ -878,7 +959,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">稳态值与解析式 <code>banks_per_channel × 4 KiB / tR</code> 逐位吻合；Grade 3 的 96 GB/s 天花板来自默认内部通路 101.25 GB/s 原始码字，不是接口也不是阵列。冷页读延迟 4.44–4.51 µs（tR=4 µs），同页缓存命中 131–196 ns。</p>
 
-<h3 id="s8-1">8.1 地址布局 A/B：顺序物理访问下差 15.8 倍</h3>
+<h3 id="s8-1">9.1 地址布局 A/B：顺序物理访问下差 15.8 倍</h3>
 <p>B1 的动机就是这张表。同一台设备（1 通道 × 1 die × 16 bank，tR = 4 µs，4 KiB 页），把 256 个<b>连续物理页</b>一次性下发，只切换通道内的地址布局：</p>
 <table>
   <thead><tr><th>布局</th><th>256 页顺序读</th><th>每通道有效带宽</th><th>解析预期</th><th>顺序写（同样 256 页）</th></tr></thead>
@@ -893,7 +974,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>同一类假设在 GC / 磨损均衡里还有第二处</strong>：<code>relocate_live_pages</code> 与回收校验都用 <code>block_begin + page</code> 找块内页，在 ocp_v070 下重定位会读写错页，回收提交时直接报 “GC source page table remained live at reclaim commit”。已一并改为按布局编码，并新增 <code>hbf_gc_layout</code> 测试：回退修复该测试失败、恢复修复后通过，两层验证都留在了仓库里。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
-<h2 id="paths">9. 外部 → HBF 的三条路径</h2>
+<h2 id="paths">10. 外部 → HBF 的三条路径</h2>
 <p class="lead">模型里"外部到 HBF"有三条可测量路径，区别不在物理路线，而在<strong>一条 session 事务计了哪几段</strong>：每条事务只负责一个阶段，端到端必须用 <code>dependencies</code> 串联。</p>
 
 <figure>
@@ -1065,7 +1146,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>读图结论</strong>：B 与 C 走的是同一条物理 lane，差别只在事务覆盖面；A 计满设备内部，测的是设备接口能力。数值相差两个数量级（链路 32 GB/s 对端到端 0.1–0.7 GB/s），说明瓶颈在 NAND 的 program/erase，而不在封装外链路——这与 HBF"读快写慢"的定位一致。</p>
 <p class="muted">复现脚本随文档放在 <code>docs/survey/</code>：<code>fork_evidence.py</code>（路径 A）、<code>ext_lane.py</code>（路径 B）、<code>ext_to_hbf_chain.py</code>（路径 C）。B/C 路径需要 <code>hbf-external-direct-link-enable=true</code> 与 <code>enable_external=True</code>；C 还要求物理写所需的 published extent。</p>
 
-<h3 id="s9-1">9.1 A 与 C 的关系：同一段落盘路径的两个入口</h3>
+<h3 id="s9-1">10.1 A 与 C 的关系：同一段落盘路径的两个入口</h3>
 <p>把 C 拆开量一次，可以直接看到"差不多"的来源（预擦除块、单通道 16 plane、ocp 布局）：</p>
 <table>
   <thead><tr><th>阶段</th><th>64 页</th><th>256 页</th><th>说明</th></tr></thead>
@@ -1167,10 +1248,10 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 
 <p><strong>数值上的印证</strong>：C 的端到端带宽（0.744 GB/s，预擦除）几乎等于 A 写方向的极限，说明前两段（外部设备读、lane 32 GB/s）都不是瓶颈；而 A 的<strong>读</strong>方向不经过 program，所以能跑到 48/96 GB/s·通道。一句话：A 是"营业窗口"，C 是"补货通道"——补货再快也得按"上架"速度算，而"上架"和客人存东西是同一条流水线。</p>
 
-<h2 id="evidence">10. 完成度取证（fork 当前代码重跑）</h2>
+<h2 id="evidence">11. 完成度取证（fork 当前代码重跑）</h2>
 <p>以下是目标验收的重跑数据，全部在 fork 分支 <code>feat/ocp-v070-gaps</code> 的当前代码上执行（地址布局、GC/擦除修复、刷新机制均已合入），用于确认后续改动没有让既有结论回归。</p>
 
-<h3 id="s10-1">10.1 规格带宽复现</h3>
+<h3 id="s10-1">11.1 规格带宽复现</h3>
 <table>
   <thead><tr><th>配置</th><th>banks/通道</th><th>实测每通道</th><th>规格</th><th>结论</th></tr></thead>
   <tbody>
@@ -1181,7 +1262,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">方法：斜率法（每 bank 1 轮 vs 5 轮差分）消除流水线填充；4 个 HBF stack，数值已折算到单通道。</p>
 
-<h3 id="s10-2">10.2 地址布局 A/B（顺序物理访问）</h3>
+<h3 id="s10-2">11.2 地址布局 A/B（顺序物理访问）</h3>
 <table>
   <thead><tr><th>布局</th><th>256 页顺序读</th><th>顺序写</th><th>解析预期</th></tr></thead>
   <tbody>
@@ -1191,7 +1272,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">读写分别 15.8× / 16×，与解析式逐项吻合，说明模型把"布局 → bank 并行度 → 有效带宽"这条链路算对了。</p>
 
-<h3 id="s10-3">10.3 验证与回归</h3>
+<h3 id="s10-3">11.3 验证与回归</h3>
 <ul>
   <li><strong>全量测试 146/148 通过</strong>；仅两个 <code>serveloop_*</code> 用例失败，原因是需要外部 ServeLoop 仓库检出（基线同样失败，属环境缺口）。</li>
   <li>与规格、布局、刷新相关的新增用例：<code>hbf_address_layout</code>（双布局往返 / p.22 低位规则 / p.63 Bank_Num 代数）、<code>hbf_read_disturb</code>、<code>hbf_read_disturb_controller</code>、<code>hbf_gc_layout</code>。</li>
@@ -1199,14 +1280,14 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   <li>默认行为等价性：阈值/retention/刷新开关取默认值时，场景结果与改动前完全一致。</li>
 </ul>
 
-<h3 id="s10-4">10.4 已知边界（明确不宣称）</h3>
+<h3 id="s10-4">11.4 已知边界（明确不宣称）</h3>
 <ul>
   <li>未建模：scratchpad、batch read hint、UCIe flit/CRC/replay、per-AXI-ID 响应队列、UECC/CECC 失效、多平面/cache program、坏块与 retention 失效（详见第 5 章差距审计）。</li>
   <li>刷新：检测、触发、重写、独立记账、<code>waf_refresh</code> 上报已完成；die 级互斥以"共享 per-die sequencer / per-bank sense 资源"的方式近似，未引入独立 gate。</li>
   <li>时序参数（tR/tPROG/tERS、内部通路带宽）是研究假设，已在 provenance 中标注证据等级。</li>
 </ul>
 
-<h2 id="refs">11. 参考</h2>
+<h2 id="refs">12. 参考</h2>
 <ul>
   <li>仓库：<a href="https://github.com/FlashLabAE/HBFSim">github.com/FlashLabAE/HBFSim</a>（MIT）</li>
   <li>论文：<a href="https://arxiv.org/abs/2610.23503">HBFSim: A Simulator for Exploring HBF in Memory Hierarchies for LLMs</a>（arXiv:2610.23503, 2026-10）</li>
@@ -1216,7 +1297,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </ul>
 
 <div class="foot">
-  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-04。
+  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-05。
   文中"无 SystemC 依赖"为对该检出 <span class="src">src/ · cmake/ · CMakeLists.txt</span> 的全文检索结果。
 </div>
 
