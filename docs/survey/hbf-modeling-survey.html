@@ -968,6 +968,100 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   <li><strong>结果</strong>：40 MB staging buffer 达到理想 HBF（HBM 级延迟）的 <strong>92.4%</strong>；H3 即使 320 MB 也只有 <strong>43.1%</strong>；16 MB 版本与 40 MB 相差 4%；MoE 场景 91.2%。</li>
 </ul>
 
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 930" role="img" aria-label="SlipStream 机制结构框图">
+<defs>
+  <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/></marker>
+  <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7ee0b8"/></marker>
+  <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f2c14e"/></marker>
+  <style>
+    .t{fill:#e6e9f0;font:14px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+    .s{fill:#9aa4b8;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+    .g{fill:#8fe0b5;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+    .y{fill:#f2c14e;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+    .b{fill:#cfe3ff;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+    .box{fill:#1b2130;stroke:#33405a;stroke-width:1.2}
+    .soft{fill:#141a26;stroke:#3a4a6a;stroke-width:1.2;stroke-dasharray:6 4}
+    .hot{fill:#16241f;stroke:#37805e;stroke-width:1.4}
+    .ctl{fill:#1d2333;stroke:#4a5a7a;stroke-width:1.3}
+    .ar{stroke:#7ee0b8;stroke-width:1.5;fill:none;marker-end:url(#m2)}
+    .arx{stroke:#6b82a5;stroke-width:1.3;fill:none;marker-end:url(#m1)}
+    .arw{stroke:#f2c14e;stroke-width:1.5;fill:none;marker-end:url(#m3)}
+    .arq{stroke:#8fa0bd;stroke-width:1.2;fill:none;stroke-dasharray:5 4;marker-end:url(#m1)}
+  </style>
+</defs>
+<rect width="1000" height="930" fill="#0f1117"/>
+<text x="30" y="36" class="t" style="font-size:17px">SlipStream 怎么工作：先排练 → 边搬边等需求 → 用到才放行</text>
+<text x="30" y="58" class="s">一个专门的 warp 按剧本提前搬页；但只有真正被用到的页，才允许它继续往前跑</text>
+<rect x="30" y="80" width="440" height="210" rx="10" class="soft"/>
+<text x="46" y="104" class="b">软件侧：一次性排练</text>
+<rect x="46" y="118" width="170" height="56" rx="7" class="box"/>
+<text x="131" y="141" text-anchor="middle" class="t">Profiler</text>
+<text x="131" y="159" text-anchor="middle" class="s">记录 kernel 的页需求顺序</text>
+<rect x="252" y="118" width="200" height="56" rx="7" class="box"/>
+<text x="352" y="141" text-anchor="middle" class="t">剧本 Bind Map</text>
+<text x="352" y="159" text-anchor="middle" class="s">每 CTA 的 4 KB 页序列</text>
+<rect x="120" y="204" width="250" height="56" rx="7" class="hot"/>
+<text x="245" y="227" text-anchor="middle" class="g">Staging Warp（生产者）</text>
+<text x="245" y="245" text-anchor="middle" class="s">按剧本发 STAGE 指令</text>
+<path class="arx" d="M216 146 L248 146"/>
+<path class="arx" d="M352 174 L300 200"/>
+<text x="510" y="104" class="b">硬件侧：边搬边等需求</text>
+<rect x="520" y="118" width="220" height="88" rx="8" class="ctl"/>
+<text x="630" y="142" text-anchor="middle" class="t">SSHR 表（在途页）</text>
+<text x="630" y="162" text-anchor="middle" class="s">每项记一页：已发出 / 已返回</text>
+<text x="630" y="182" text-anchor="middle" class="s">被第一次用到才删项</text>
+<rect x="520" y="262" width="220" height="88" rx="8" class="box"/>
+<text x="630" y="290" text-anchor="middle" class="t">HBF 闪存</text>
+<text x="630" y="312" text-anchor="middle" class="y">读一页 4 KB ≈ 20 µs</text>
+<text x="630" y="332" text-anchor="middle" class="s">（HBM 的 20 倍）</text>
+<rect x="780" y="262" width="190" height="88" rx="8" class="hot"/>
+<text x="875" y="286" text-anchor="middle" class="g">Staging Buffer</text>
+<text x="875" y="305" text-anchor="middle" class="s">页返回才占格子</text>
+<text x="875" y="323" text-anchor="middle" class="s">被用掉才腾格子</text>
+<text x="875" y="341" text-anchor="middle" class="s">40 MB ≈ 90 页/SM</text>
+<rect x="780" y="404" width="190" height="66" rx="8" class="box"/>
+<text x="875" y="428" text-anchor="middle" class="t">Work Warps（消费者）</text>
+<text x="875" y="447" text-anchor="middle" class="s">真正算数的线程</text>
+<path class="ar" d="M370 216 C 430 210, 470 185, 516 172"/>
+<circle cx="448" cy="188" r="11" fill="#0f1117" stroke="#7ee0b8" stroke-width="1.4"/><text x="448" y="192" text-anchor="middle" style="fill:#7ee0b8;font:12px system-ui,sans-serif">1</text>
+<path class="ar" d="M630 206 L630 258"/>
+<circle cx="630" cy="232" r="11" fill="#0f1117" stroke="#7ee0b8" stroke-width="1.4"/><text x="630" y="236" text-anchor="middle" style="fill:#7ee0b8;font:12px system-ui,sans-serif">2</text>
+<path class="ar" d="M740 306 L776 306"/>
+<circle cx="758" cy="292" r="11" fill="#0f1117" stroke="#7ee0b8" stroke-width="1.4"/><text x="758" y="296" text-anchor="middle" style="fill:#7ee0b8;font:12px system-ui,sans-serif">3</text>
+<path class="ar" d="M875 402 L875 354"/>
+<circle cx="875" cy="378" r="11" fill="#0f1117" stroke="#7ee0b8" stroke-width="1.4"/><text x="875" y="382" text-anchor="middle" style="fill:#7ee0b8;font:12px system-ui,sans-serif">4</text>
+<path class="arw" d="M790 410 L762 410 L762 300 L760 300 L760 230 L706 212"/>
+<circle cx="760" cy="372" r="11" fill="#0f1117" stroke="#f2c14e" stroke-width="1.4"/><text x="760" y="376" text-anchor="middle" style="fill:#f2c14e;font:12px system-ui,sans-serif">5</text>
+<path class="arq" d="M520 200 C 470 236, 420 252, 380 252"/>
+<text x="376" y="282" class="s" style="fill:#f2c14e">SSHR 满了就让 staging 停下等</text>
+<rect x="30" y="500" width="940" height="150" rx="10" fill="#141a26" stroke="#2c3a52"/>
+<text x="48" y="524" class="t">五步流程（一条页的旅程）</text>
+<text x="48" y="548" class="s"><tspan class="g">①</tspan> Staging warp 发 STAGE：宣告"我要预取第 i 页"，在 SSHR 里占一个条目。</text>
+<text x="48" y="570" class="s"><tspan class="g">②</tspan> SSHR 把这一页变成对 HBF 的读请求。</text>
+<text x="48" y="592" class="s"><tspan class="g">③</tspan> 约 20 µs 后页返回，这时才在 staging buffer 里占一个格子。</text>
+<text x="48" y="614" class="s"><tspan class="g">④</tspan> work warp 需要数据时命中 buffer，取走即用（不再等 HBF）。</text>
+<text x="48" y="636" class="s"><tspan class="g">⑤</tspan> <tspan class="y">这一页第一次被用到时才释放 SSHR 条目</tspan>——"需求"由此给"预取"设了上限。</text>
+<text x="560" y="548" class="s">对比：</text>
+<text x="560" y="570" class="s">· 传统 cache-line 预取：条目随延迟线性涨，20 µs 要 20 倍状态。</text>
+<text x="560" y="592" class="s">· H3 整 tensor 预取：按虚拟地址顺序 ≠ 需求顺序，还要巨大 buffer。</text>
+<text x="560" y="614" class="s">· SlipStream：页粒度 + 需求限速，小 buffer 也够。</text>
+<rect x="30" y="666" width="940" height="118" rx="10" fill="#101720" stroke="#2c3a52"/>
+<text x="48" y="692" class="t">三个关键机关（为什么 buffer 不用很大）</text>
+<text x="48" y="716" class="s">1. 以 4 KB 页为单位跟踪（不是 128 B 行）：同样字节数，条目少 32 倍，才装得下 20 µs 的提前量。</text>
+<text x="48" y="738" class="s">2. 条目在"第一次被用到"时释放，而不是"页返回"时释放：预取被需求牵着走，不会跑太远把 buffer 塞满。</text>
+<text x="48" y="760" class="s">3. buffer 格子"页返回时才分配"：buffer 大小与在途请求数解耦，不会随 HBF 延迟变长而膨胀。</text>
+<rect x="30" y="800" width="940" height="118" rx="10" fill="#141a26" stroke="#2c3a52"/>
+<text x="48" y="826" class="g">90 页提前量里装了什么（每个 SM 每 1 µs 用一页，HBF 20 µs）</text>
+<rect x="48" y="840" width="150" height="26" rx="5" fill="#f2c14e" opacity="0.85"/>
+<text x="208" y="858" class="s">20 页在 HBF 里飞着（20 µs × 1 页/µs）</text>
+<rect x="48" y="876" width="500" height="26" rx="5" fill="#37805e" opacity="0.85"/>
+<text x="558" y="894" class="s">约 70 页已返回、在 buffer 里排队等被用——buffer 要装的就是这些</text>
+<text x="48" y="912" class="s" style="fill:#6b7a93">判据：提前量 × 每页耗时 ≥ HBF 延迟。</text>
+</svg>
+<figcaption>图 9-2　SlipStream 结构框图：软件侧一次性排练页顺序，硬件侧由 staging warp 按剧本预取；SSHR 条目在"首次被用到"时才释放，需求由此给预取限速。</figcaption>
+</figure>
+
 <h3 id="pf-comparison">9.3 与其它方案的对比</h3>
 <table>
   <thead><tr><th>方案</th><th>粒度 / 跟踪预算</th><th>预取顺序</th><th>主要瓶颈</th><th>相对理想 HBF</th></tr></thead>
