@@ -96,7 +96,7 @@
 <body>
 <aside class="sidebar">
   <a class="sb-home" href="#">HBF 建模 survey</a>
-  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-05</div>
+  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-23</div>
   <nav class="sb-nav"><ol>
     <li><a href="#s1">1. 它是什么</a>
       <ul><li><a href="#hs1">它建模什么</a></li><li><a href="#hs2">它不做什么（明确边界）</a></li><li><a href="#s1-1">1.1 同类开源方案在 GitHub 上的位置</a></li></ul></li>
@@ -114,13 +114,15 @@
       <ul><li><a href="#hs10">速率等级（p.16 Table 2/4，AXI 75% 效率只应用一次）</a></li><li><a href="#hs11">设备与介质默认值</a></li></ul></li>
     <li><a href="#ftl">8. FTL 机制：映射、写缓冲、GC、磨损均衡</a>
       <ul><li><a href="#ftl-map">8.1 地址映射（L2P）</a></li><li><a href="#ftl-write">8.2 写缓冲（DLU）</a></li><li><a href="#ftl-gc">8.3 垃圾回收（GC）</a></li><li><a href="#ftl-wl">8.4 磨损均衡（两层 + zone）</a></li><li><a href="#ftl-stats">8.5 计数与状态</a></li><li><a href="#ftl-missing">8.6 明确没有实现的</a></li><li><a href="#ftl-tests">8.7 对应测试</a></li></ul></li>
-    <li><a href="#s8">9. 实测表现（本地对拍，tR 扫描）</a>
-      <ul><li><a href="#s8-1">9.1 地址布局 A/B：顺序物理访问下差 15.8 倍</a></li></ul></li>
-    <li><a href="#paths">10. 外部 → HBF 的三条路径</a>
-      <ul><li><a href="#s9-1">10.1 A 与 C 的关系：同一段落盘路径的两个入口</a></li></ul></li>
-    <li><a href="#evidence">11. 完成度取证（fork 当前代码重跑）</a>
-      <ul><li><a href="#s10-1">11.1 规格带宽复现</a></li><li><a href="#s10-2">11.2 地址布局 A/B（顺序物理访问）</a></li><li><a href="#s10-3">11.3 验证与回归</a></li><li><a href="#s10-4">11.4 已知边界（明确不宣称）</a></li></ul></li>
-    <li><a href="#refs">12. 参考</a></li>
+    <li><a href="#prefetch">9. HBF 预取与 staging 策略</a>
+      <ul><li><a href="#pf-problem">9.1 为什么线粒度和整 tensor 预取都不行</a></li><li><a href="#pf-mechanism">9.2 SlipStream 的机制</a></li><li><a href="#pf-comparison">9.3 与其它方案的对比</a></li><li><a href="#pf-experiment">9.4 用 HBFSim 校准的最小实验</a></li><li><a href="#pf-opensource">9.5 开源现状</a></li><li><a href="#pf-impl">9.6 对 HBFSim 的启示</a></li></ul></li>
+    <li><a href="#s8">10. 实测表现（本地对拍，tR 扫描）</a>
+      <ul><li><a href="#s8-1">10.1 地址布局 A/B：顺序物理访问下差 15.8 倍</a></li></ul></li>
+    <li><a href="#paths">11. 外部 → HBF 的三条路径</a>
+      <ul><li><a href="#s9-1">11.1 A 与 C 的关系：同一段落盘路径的两个入口</a></li></ul></li>
+    <li><a href="#evidence">12. 完成度取证（fork 当前代码重跑）</a>
+      <ul><li><a href="#s10-1">12.1 规格带宽复现</a></li><li><a href="#s10-2">12.2 地址布局 A/B（顺序物理访问）</a></li><li><a href="#s10-3">12.3 验证与回归</a></li><li><a href="#s10-4">12.4 已知边界（明确不宣称）</a></li></ul></li>
+    <li><a href="#refs">13. 参考</a></li>
   </ol></nav>
   <a class="sb-top" href="#">↑ 回到顶部</a>
 </aside>
@@ -947,7 +949,102 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <h3 id="ftl-tests">8.7 对应测试</h3>
 <p class="muted"><code>hbf_mapping_cache</code> · <code>hbf_mapping_layout</code> · <code>hbf_mapping_multistack</code> · <code>hbf_mapping_organization</code> · <code>hbf_mapping_placement</code> · <code>hbf_mapping_sram</code> · <code>hbf_gc_index</code> · <code>hbf_gc_reserve</code> · <code>hbf_gc_drain_parallel</code> · <code>hbf_gc_layout</code> · <code>hbf_static_wear_leveling</code> · <code>hbf_persistent_image</code>（共 12 个）</p>
 
-<h2 id="s8">9. 实测表现（本地对拍，tR 扫描）</h2>
+<h2 id="prefetch">9. HBF 预取与 staging 策略</h2>
+<p class="lead">HBF 的读延迟约 <strong>20 µs</strong>，是 HBM 的 20 倍；on-demand 访问会让 LLM 推理慢到 10–12.8×。要把它藏起来，必须把"预取"做成一条<strong>受需求节流的生产者-消费者流水线</strong>。本节整理 SlipStream（HPCA 2027）与它的对比方案，并给出一个用 HBFSim 校准的最小策略实验。</p>
+
+<h3 id="pf-problem">9.1 为什么线粒度和整 tensor 预取都不行</h3>
+<table>
+  <thead><tr><th>方案类别</th><th>做法</th><th>面对 20 µs 延迟的问题</th></tr></thead>
+  <tbody>
+    <tr><td>cache-line 预取（CAPS、Snake、Warped PE）</td><td>按行跟踪，硬件或软件预取指令</td><td>跟踪状态随延迟线性增长：256 项只覆盖 <strong>8 页/SM</strong>（20× 差距）；一次迟到就让 SM 停几微秒</td></tr>
+    <tr><td>整 tensor 预取（H3）</td><td>按 tensor 的虚拟地址顺序把页流进 staging buffer，缓解按访问逐出</td><td>① <strong>order stall</strong>：kernel 需求顺序 ≠ VA 顺序（CTA 划分 + swizzle）；② <strong>capacity stall</strong>：跨 SM 负载不均，滞后的 SM 占住 buffer，快 SM 饿死</td></tr>
+  </tbody>
+</table>
+
+<h3 id="pf-mechanism">9.2 SlipStream 的机制</h3>
+<ul>
+  <li><strong>软件侧</strong>：profile 数据无关 LLM kernel 的<strong>权重页需求顺序</strong>（可重复），插入一个 staging warp，用非阻塞 <code>STAGE</code> 指令按记录顺序回放；开销 0.76–2.96%，每线程多 2–4 个寄存器。</li>
+  <li><strong>硬件侧</strong>：staging warp 是生产者、work warp 是消费者；<strong>SSHR 表项只在首次 demand 访问该页时释放</strong>（不是页返回时），所以<strong>需求本身给 staging 限速</strong>；以 <strong>4 KiB 页</strong>为跟踪粒度；buffer slot 只在页返回时分配，与在途流量解耦。</li>
+  <li><strong>结果</strong>：40 MB staging buffer 达到理想 HBF（HBM 级延迟）的 <strong>92.4%</strong>；H3 即使 320 MB 也只有 <strong>43.1%</strong>；16 MB 版本与 40 MB 相差 4%；MoE 场景 91.2%。</li>
+</ul>
+
+<h3 id="pf-comparison">9.3 与其它方案的对比</h3>
+<table>
+  <thead><tr><th>方案</th><th>粒度 / 跟踪预算</th><th>预取顺序</th><th>主要瓶颈</th><th>相对理想 HBF</th></tr></thead>
+  <tbody>
+    <tr><td>H3（CAL 2026）</td><td>tensor 页；buffer 按到达分配</td><td>VA 顺序</td><td>order stall + capacity stall</td><td class="num">40 MB：4.8–10.2× 慢；320 MB 仍 1.48×；40 MB 43.1%</td></tr>
+    <tr><td>CAPS（IPDPS 2018）</td><td>cache line；256 项 ≈ 8 页/SM</td><td>CTA 感知</td><td>lead 不足以覆盖 20 µs</td><td class="num">≈15–25%，约 4× 慢</td></tr>
+    <tr><td>Snake（MICRO 2023）</td><td>cache line；256 项</td><td>变长链</td><td>同上</td><td class="num">≈15–19%，约 4× 慢</td></tr>
+    <tr><td>Warped PE</td><td>寄存器预执行；6 页 lead</td><td>warp 提前执行</td><td>lead 太小</td><td class="num">19.3%；90 页 lead 需 +8% die area → 40 MB 80.3% / 16 MB 18.8%</td></tr>
+    <tr><td>CPU-assisted GPGPU</td><td>全局页流</td><td>CPU 预计算</td><td>无 demand pacing，跨 SM 抢占 buffer</td><td class="num">40 MB 66.8% / 16 MB 14.9%</td></tr>
+    <tr><td><strong>SlipStream</strong></td><td><strong>4 KiB 页</strong>；SSHR 按需求释放</td><td>profile 出的需求顺序</td><td>—</td><td class="num"><strong>92.4%（40 MB）/ ≈89%（16 MB）</strong></td></tr>
+  </tbody>
+</table>
+<p class="muted">数字取自论文 §VIII 与 Fig. 16 的文字描述；"相对理想 HBF" 指以 HBM 级延迟服务全部 HBF 访问时的执行时间归一化。</p>
+
+<h3 id="pf-experiment">9.4 用 HBFSim 校准的最小实验</h3>
+<p>做法：先用 HBFSim 测<strong>冷页读延迟</strong>（tR = 5 / 10 / 20 µs，实测 5.46 / 10.46 / 20.46 µs），再用事件驱动的策略模拟比较两种跟踪预算；需求为每 SM 1 页/µs、共 2000 页。</p>
+<table>
+  <thead><tr><th>跟踪预算</th><th>5 µs</th><th>10 µs</th><th>20 µs</th></tr></thead>
+  <tbody>
+    <tr><td><strong>页粒度 + 90 页 lead</strong>（≈40 MB / 108 SM）</td><td class="num">1.000×</td><td class="num">1.000×</td><td class="num">1.000×</td></tr>
+    <tr><td>行粒度 256 项 = 8 页（CAPS / Snake 预算）</td><td class="num">1.000×</td><td class="num">1.429×</td><td class="num">2.659×</td></tr>
+  </tbody>
+</table>
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" role="img" aria-label="HBF 预取：跟踪粒度与延迟覆盖">
+<style>.t{fill:#e6e9f0;font:15px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.s{fill:#9aa4b8;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.a{fill:#8fe0b5;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.b{fill:#f0a8b4;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.g{stroke:#2c3a52;stroke-width:1}</style>
+<rect width="1000" height="480" fill="#0f1117"/>
+<text x="40" y="38" class="t">跟踪粒度决定能否覆盖 HBF 读延迟（策略模拟，冷页延迟取自 HBFSim）</text>
+<text x="40" y="60" class="s">纵轴：相对理想 HBF（HBM 级延迟）的归一化执行时间；越接近 1.0 越好</text>
+<line x1="90" y1="330.0" x2="940" y2="330.0" class="g"/>
+<text x="78" y="334.0" text-anchor="end" class="s">1.0x</text>
+<line x1="90" y1="265.0" x2="940" y2="265.0" class="g"/>
+<text x="78" y="269.0" text-anchor="end" class="s">1.5x</text>
+<line x1="90" y1="200.0" x2="940" y2="200.0" class="g"/>
+<text x="78" y="204.0" text-anchor="end" class="s">2.0x</text>
+<line x1="90" y1="135.0" x2="940" y2="135.0" class="g"/>
+<text x="78" y="139.0" text-anchor="end" class="s">2.5x</text>
+<line x1="90" y1="96.0" x2="940" y2="96.0" class="g"/>
+<text x="78" y="100.0" text-anchor="end" class="s">2.8x</text>
+<text x="200" y="356" text-anchor="middle" class="s">5 µs</text>
+<rect x="130" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="161.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="208" y="330.0" width="62" height="0.0" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="239.0" y="322.0" text-anchor="middle" class="b">1.00x</text>
+<text x="350" y="356" text-anchor="middle" class="s">10 µs</text>
+<rect x="280" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="311.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="358" y="274.2" width="62" height="55.8" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="389.0" y="266.2" text-anchor="middle" class="b">1.43x</text>
+<text x="500" y="356" text-anchor="middle" class="s">20 µs</text>
+<rect x="430" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="461.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="508" y="114.3" width="62" height="215.7" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="539.0" y="106.3" text-anchor="middle" class="b">2.66x</text>
+<rect x="90" y="388" width="14" height="14" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="112" y="400" class="a">页粒度 + 90 页 lead（40 MB / 108 SM，SlipStream 量级）</text>
+<rect x="90" y="412" width="14" height="14" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="112" y="424" class="b">行粒度 256 项 = 8 页（CAPS / Snake 的跟踪预算）</text>
+<text x="90" y="454" class="s">结论：页粒度把「延迟覆盖」与「跟踪项数」解耦——90 页 lead 在 5–20 µs 下都达到理想；行粒度 8 页只能覆盖 ≤8 µs。</text>
+</svg>
+<figcaption>图 9-1　跟踪粒度 vs 延迟覆盖：页粒度 90 页 lead 在 5–20 µs 都达到理想；行粒度 8 页只能覆盖 ≤8 µs。</figcaption>
+</figure>
+<p><strong>结论</strong>：隐藏延迟所需的 lead ≈ <code>⌈L / T_demand⌉ + 2</code> 页（5/10/20 µs 对应 7/12/22 页）；页粒度把"延迟覆盖"与"跟踪项数"解耦，因此<strong>同一块 90 页（≈40 MB/108 SM）的 buffer 在 5–20 µs 都够用</strong>——这就是"buffer 大小与 HBF 延迟无关"的机制来源。</p>
+<p class="muted">局限：这是策略级流水线模拟（服务时间取 HBFSim 冷页延迟），不含多 SM 乱序、带宽竞争与乱序完成；它验证的是"跟踪粒度 + 需求限速"这一机制，不复现绝对性能。脚本：<code>docs/survey/staging_policy_experiment.py</code>。</p>
+
+<h3 id="pf-opensource">9.5 开源现状</h3>
+<ul>
+  <li>SlipStream 论文<a href="https://arxiv.org/abs/2611.14776">arXiv 2611.14776</a>（HPCA 2027，CC BY 4.0）<strong>没有官方代码</strong>；一作 GitHub（Anish-Saxena）无对应仓库。</li>
+  <li>最接近的开源基座：<a href="https://github.com/jager197/accel-sim-hbf">jager197/accel-sim-hbf</a>（HBF-Sim：基于 Accel-Sim/GPGPU-Sim 的 GPU–HBF 模拟器，遵循 OCP HBF 规范，含页粒度 MSHR 合并与 flash 并行建模）。</li>
+  <li>另有 <a href="https://github.com/SlugLab/HBFSim">SlugLab/HBFSim</a>（真机注入 HBF 时序）与本 fork 的 HBFSim（主机侧事件模型）。</li>
+  <li>复现路径：<strong>A</strong> 在 accel-sim-hbf 上加 SSHR/STAGE；<strong>B</strong> 真机 staging warp + L2 prefetch；<strong>C</strong> 在本 HBFSim 上做策略级评估（即 9.4 的做法）。</li>
+</ul>
+
+<h3 id="pf-impl">9.6 对 HBFSim 的启示</h3>
+<p>要在模型里直接评估这类方案，需要补三样东西：<strong>host 侧 staging buffer</strong>（容量/替换/需求驱动释放）、<strong>prefetch 与 demand 的优先级与带宽共享</strong>、<strong>HBF→HBM 的搬运链</strong>（D2D 或直连 lane）。当前模型能表达"HBF 读 + HBM 写"的依赖链，但没有 buffer 语义，所以 9.4 的实验是外挂策略模拟。</p>
+
+<h2 id="s8">10. 实测表现（本地对拍，tR 扫描）</h2>
 <table>
   <thead><tr><th>Grade</th><th>规格 每通道</th><th>banks/ch</th><th>tR=4 µs</th><th>tR=2 µs</th><th>tR=1 µs</th></tr></thead>
   <tbody>
@@ -959,7 +1056,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">稳态值与解析式 <code>banks_per_channel × 4 KiB / tR</code> 逐位吻合；Grade 3 的 96 GB/s 天花板来自默认内部通路 101.25 GB/s 原始码字，不是接口也不是阵列。冷页读延迟 4.44–4.51 µs（tR=4 µs），同页缓存命中 131–196 ns。</p>
 
-<h3 id="s8-1">9.1 地址布局 A/B：顺序物理访问下差 15.8 倍</h3>
+<h3 id="s8-1">10.1 地址布局 A/B：顺序物理访问下差 15.8 倍</h3>
 <p>B1 的动机就是这张表。同一台设备（1 通道 × 1 die × 16 bank，tR = 4 µs，4 KiB 页），把 256 个<b>连续物理页</b>一次性下发，只切换通道内的地址布局：</p>
 <table>
   <thead><tr><th>布局</th><th>256 页顺序读</th><th>每通道有效带宽</th><th>解析预期</th><th>顺序写（同样 256 页）</th></tr></thead>
@@ -974,7 +1071,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>同一类假设在 GC / 磨损均衡里还有第二处</strong>：<code>relocate_live_pages</code> 与回收校验都用 <code>block_begin + page</code> 找块内页，在 ocp_v070 下重定位会读写错页，回收提交时直接报 “GC source page table remained live at reclaim commit”。已一并改为按布局编码，并新增 <code>hbf_gc_layout</code> 测试：回退修复该测试失败、恢复修复后通过，两层验证都留在了仓库里。</p>
 <p class="muted">复现：物理访问需要先声明 extent（<code>static_hbf_blocks_per_plane=0</code>、<code>published_hbf_blocks_per_plane=16</code>），脚本见仓库 <code>docs/survey/ab_layout_physical.py</code>。</p>
 
-<h2 id="paths">10. 外部 → HBF 的三条路径</h2>
+<h2 id="paths">11. 外部 → HBF 的三条路径</h2>
 <p class="lead">模型里"外部到 HBF"有三条可测量路径，区别不在物理路线，而在<strong>一条 session 事务计了哪几段</strong>：每条事务只负责一个阶段，端到端必须用 <code>dependencies</code> 串联。</p>
 
 <figure>
@@ -1146,7 +1243,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 <p><strong>读图结论</strong>：B 与 C 走的是同一条物理 lane，差别只在事务覆盖面；A 计满设备内部，测的是设备接口能力。数值相差两个数量级（链路 32 GB/s 对端到端 0.1–0.7 GB/s），说明瓶颈在 NAND 的 program/erase，而不在封装外链路——这与 HBF"读快写慢"的定位一致。</p>
 <p class="muted">复现脚本随文档放在 <code>docs/survey/</code>：<code>fork_evidence.py</code>（路径 A）、<code>ext_lane.py</code>（路径 B）、<code>ext_to_hbf_chain.py</code>（路径 C）。B/C 路径需要 <code>hbf-external-direct-link-enable=true</code> 与 <code>enable_external=True</code>；C 还要求物理写所需的 published extent。</p>
 
-<h3 id="s9-1">10.1 A 与 C 的关系：同一段落盘路径的两个入口</h3>
+<h3 id="s9-1">11.1 A 与 C 的关系：同一段落盘路径的两个入口</h3>
 <p>把 C 拆开量一次，可以直接看到"差不多"的来源（预擦除块、单通道 16 plane、ocp 布局）：</p>
 <table>
   <thead><tr><th>阶段</th><th>64 页</th><th>256 页</th><th>说明</th></tr></thead>
@@ -1248,10 +1345,10 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 
 <p><strong>数值上的印证</strong>：C 的端到端带宽（0.744 GB/s，预擦除）几乎等于 A 写方向的极限，说明前两段（外部设备读、lane 32 GB/s）都不是瓶颈；而 A 的<strong>读</strong>方向不经过 program，所以能跑到 48/96 GB/s·通道。一句话：A 是"营业窗口"，C 是"补货通道"——补货再快也得按"上架"速度算，而"上架"和客人存东西是同一条流水线。</p>
 
-<h2 id="evidence">11. 完成度取证（fork 当前代码重跑）</h2>
+<h2 id="evidence">12. 完成度取证（fork 当前代码重跑）</h2>
 <p>以下是目标验收的重跑数据，全部在 fork 分支 <code>feat/ocp-v070-gaps</code> 的当前代码上执行（地址布局、GC/擦除修复、刷新机制均已合入），用于确认后续改动没有让既有结论回归。</p>
 
-<h3 id="s10-1">11.1 规格带宽复现</h3>
+<h3 id="s10-1">12.1 规格带宽复现</h3>
 <table>
   <thead><tr><th>配置</th><th>banks/通道</th><th>实测每通道</th><th>规格</th><th>结论</th></tr></thead>
   <tbody>
@@ -1262,7 +1359,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">方法：斜率法（每 bank 1 轮 vs 5 轮差分）消除流水线填充；4 个 HBF stack，数值已折算到单通道。</p>
 
-<h3 id="s10-2">11.2 地址布局 A/B（顺序物理访问）</h3>
+<h3 id="s10-2">12.2 地址布局 A/B（顺序物理访问）</h3>
 <table>
   <thead><tr><th>布局</th><th>256 页顺序读</th><th>顺序写</th><th>解析预期</th></tr></thead>
   <tbody>
@@ -1272,7 +1369,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </table>
 <p class="muted">读写分别 15.8× / 16×，与解析式逐项吻合，说明模型把"布局 → bank 并行度 → 有效带宽"这条链路算对了。</p>
 
-<h3 id="s10-3">11.3 验证与回归</h3>
+<h3 id="s10-3">12.3 验证与回归</h3>
 <ul>
   <li><strong>全量测试 146/148 通过</strong>；仅两个 <code>serveloop_*</code> 用例失败，原因是需要外部 ServeLoop 仓库检出（基线同样失败，属环境缺口）。</li>
   <li>与规格、布局、刷新相关的新增用例：<code>hbf_address_layout</code>（双布局往返 / p.22 低位规则 / p.63 Bank_Num 代数）、<code>hbf_read_disturb</code>、<code>hbf_read_disturb_controller</code>、<code>hbf_gc_layout</code>。</li>
@@ -1280,14 +1377,14 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
   <li>默认行为等价性：阈值/retention/刷新开关取默认值时，场景结果与改动前完全一致。</li>
 </ul>
 
-<h3 id="s10-4">11.4 已知边界（明确不宣称）</h3>
+<h3 id="s10-4">12.4 已知边界（明确不宣称）</h3>
 <ul>
   <li>未建模：scratchpad、batch read hint、UCIe flit/CRC/replay、per-AXI-ID 响应队列、UECC/CECC 失效、多平面/cache program、坏块与 retention 失效（详见第 5 章差距审计）。</li>
   <li>刷新：检测、触发、重写、独立记账、<code>waf_refresh</code> 上报已完成；die 级互斥以"共享 per-die sequencer / per-bank sense 资源"的方式近似，未引入独立 gate。</li>
   <li>时序参数（tR/tPROG/tERS、内部通路带宽）是研究假设，已在 provenance 中标注证据等级。</li>
 </ul>
 
-<h2 id="refs">12. 参考</h2>
+<h2 id="refs">13. 参考</h2>
 <ul>
   <li>仓库：<a href="https://github.com/FlashLabAE/HBFSim">github.com/FlashLabAE/HBFSim</a>（MIT）</li>
   <li>论文：<a href="https://arxiv.org/abs/2610.23503">HBFSim: A Simulator for Exploring HBF in Memory Hierarchies for LLMs</a>（arXiv:2610.23503, 2026-10）</li>
@@ -1297,7 +1394,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </ul>
 
 <div class="foot">
-  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-05。
+  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-23。
   文中"无 SystemC 依赖"为对该检出 <span class="src">src/ · cmake/ · CMakeLists.txt</span> 的全文检索结果。
 </div>
 

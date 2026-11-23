@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" role="img" aria-label="HBF 预取：跟踪粒度与延迟覆盖">
+<style>.t{fill:#e6e9f0;font:15px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.s{fill:#9aa4b8;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.a{fill:#8fe0b5;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.b{fill:#f0a8b4;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}.g{stroke:#2c3a52;stroke-width:1}</style>
+<rect width="1000" height="480" fill="#0f1117"/>
+<text x="40" y="38" class="t">跟踪粒度决定能否覆盖 HBF 读延迟（策略模拟，冷页延迟取自 HBFSim）</text>
+<text x="40" y="60" class="s">纵轴：相对理想 HBF（HBM 级延迟）的归一化执行时间；越接近 1.0 越好</text>
+<line x1="90" y1="330.0" x2="940" y2="330.0" class="g"/>
+<text x="78" y="334.0" text-anchor="end" class="s">1.0x</text>
+<line x1="90" y1="265.0" x2="940" y2="265.0" class="g"/>
+<text x="78" y="269.0" text-anchor="end" class="s">1.5x</text>
+<line x1="90" y1="200.0" x2="940" y2="200.0" class="g"/>
+<text x="78" y="204.0" text-anchor="end" class="s">2.0x</text>
+<line x1="90" y1="135.0" x2="940" y2="135.0" class="g"/>
+<text x="78" y="139.0" text-anchor="end" class="s">2.5x</text>
+<line x1="90" y1="96.0" x2="940" y2="96.0" class="g"/>
+<text x="78" y="100.0" text-anchor="end" class="s">2.8x</text>
+<text x="200" y="356" text-anchor="middle" class="s">5 µs</text>
+<rect x="130" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="161.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="208" y="330.0" width="62" height="0.0" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="239.0" y="322.0" text-anchor="middle" class="b">1.00x</text>
+<text x="350" y="356" text-anchor="middle" class="s">10 µs</text>
+<rect x="280" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="311.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="358" y="274.2" width="62" height="55.8" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="389.0" y="266.2" text-anchor="middle" class="b">1.43x</text>
+<text x="500" y="356" text-anchor="middle" class="s">20 µs</text>
+<rect x="430" y="330.0" width="62" height="0.0" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="461.0" y="322.0" text-anchor="middle" class="a">1.00x</text>
+<rect x="508" y="114.3" width="62" height="215.7" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="539.0" y="106.3" text-anchor="middle" class="b">2.66x</text>
+<rect x="90" y="388" width="14" height="14" rx="3" fill="#8fe0b5" opacity="0.85"/>
+<text x="112" y="400" class="a">页粒度 + 90 页 lead（40 MB / 108 SM，SlipStream 量级）</text>
+<rect x="90" y="412" width="14" height="14" rx="3" fill="#f0a8b4" opacity="0.85"/>
+<text x="112" y="424" class="b">行粒度 256 项 = 8 页（CAPS / Snake 的跟踪预算）</text>
+<text x="90" y="454" class="s">结论：页粒度把「延迟覆盖」与「跟踪项数」解耦——90 页 lead 在 5–20 µs 下都达到理想；行粒度 8 页只能覆盖 ≤8 µs。</text>
+</svg>
