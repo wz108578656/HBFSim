@@ -96,7 +96,7 @@
 <body>
 <aside class="sidebar">
   <a class="sb-home" href="#">HBF 建模 survey</a>
-  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-23</div>
+  <div class="sb-sub">分支 feat/ocp-v070-gaps · 更新 2026-11-25</div>
   <nav class="sb-nav"><ol>
     <li><a href="#s1">1. 它是什么</a>
       <ul><li><a href="#hs1">它建模什么</a></li><li><a href="#hs2">它不做什么（明确边界）</a></li><li><a href="#s1-1">1.1 同类开源方案在 GitHub 上的位置</a></li></ul></li>
@@ -107,7 +107,7 @@
     <li><a href="#s4">4. 设备内部结构：层次与数据通路</a>
       <ul><li><a href="#s4-1">4.1 层次与对外接口</a></li><li><a href="#s4-2">4.2 每层挂的是哪条日历</a></li><li><a href="#s4-3">4.3 一次 4 KiB 读穿过各层</a></li><li><a href="#s4-4">4.4 结构图上"没有"的部分</a></li></ul></li>
     <li><a href="#s5">5. 与 OCP HBF v0.7.0 的差距审计</a>
-      <ul><li><a href="#s5-1">5.1 对外接口（UCIe / AXI）</a></li><li><a href="#s5-2">5.2 地址映射与 DLU</a></li><li><a href="#s5-3">5.3 读路径</a></li><li><a href="#s5-4">5.4 写路径</a></li><li><a href="#s5-5">5.5 Scratchpad（规范可选特性）</a></li><li><a href="#s5-6">5.6 介质可靠性 / 寿命</a></li><li><a href="#s5-7">5.7 控制 / 调试 / 热</a></li><li><a href="#s5-8">5.8 参数不确定性（规范本身的空洞，不是模型缺陷）</a></li><li><a href="#s5-9">5.9 如果要补齐，优先级怎么排</a></li></ul></li>
+      <ul><li><a href="#s5-1">5.1 对外接口（UCIe / AXI）</a></li><li><a href="#s5-2">5.2 地址映射与 DLU</a></li><li><a href="#s5-3">5.3 读路径</a></li><li><a href="#s5-4">5.4 写路径</a></li><li><a href="#s5-5">5.5 Scratchpad（规范可选特性）</a></li><li><a href="#s5-6">5.6 介质可靠性 / 寿命</a></li><li><a href="#s5-7">5.7 控制 / 调试 / 热</a></li><li><a href="#s5-8">5.8 参数不确定性（规范本身的空洞，不是模型缺陷）</a></li><li><a href="#s5-9">5.9 如果要补齐，优先级怎么排</a></li><li><a href="#s5-10">5.10 刷新与近存计算：Synapse 的另一条路线</a></li></ul></li>
     <li><a href="#systemc">6. 能否接入 SystemC 环境</a>
       <ul><li><a href="#hs6">关键事实（为什么可行）</a></li><li><a href="#hs7">三种接入路径</a></li><li><a href="#hs8">路径 B 的代码骨架</a></li><li><a href="#hs9">接入时必须处理的 4 个细节</a></li></ul></li>
     <li><a href="#s7">7. 关键参数与默认值</a>
@@ -713,6 +713,21 @@
   <li><strong>A6 + A7 AXI user 字段与 per-ID 队列</strong> —— 接口语义完整性，决定 batch hint 能否进来、开环注入是否高估并发。</li>
 </ol>
 <p class="muted">前四项可以在 HBFSim 上以插件/改造方式加；B1 需要同时动设备映射与主机 FTL（已完成）；R1 要新增 per-block 计数、错误码与主机策略，但没有架构性障碍——读/写路径都是现成的。</p>
+
+<h3 id="s5-10">5.10 刷新与近存计算：Synapse 的另一条路线</h3>
+<p>我们的 R1 把读干扰刷新做成"<strong>设备上报健康信息、主机决策并驱动重写</strong>"；KAIST 的 Synapse（arXiv 2611.29901，2026）走的是另一条路：<strong>在硬件里按 wordline 统计物理读、比较器门控 NAND 读使能、并做局部块拷贝刷新</strong>。两条路线可以对照。</p>
+<table>
+  <thead><tr><th>维度</th><th>本 fork 的 R1（已实现）</th><th>Synapse 的 Fortify</th></tr></thead>
+  <tbody>
+    <tr><td>计数粒度</td><td>每个物理 block 的读次数</td><td><strong>每个 wordline</strong> 的物理读次数（读计数 SRAM）</td></tr>
+    <tr><td>触发者</td><td>主机策略（阈值 / retention）</td><td><strong>硬件</strong>：并行比较器在发读前预测压力，直接门控 read-enable</td></tr>
+    <tr><td>刷新方式</td><td>主机发起块迁移（复用 GC 重定位）</td><td>bank 内局部块拷贝（S→D，经 ECC），完成后改映射、擦 S</td></tr>
+    <tr><td>与计算的关系</td><td>与主机写节奏同窗口，占用同一套资源</td><td><strong>与 attention 重叠</strong>：另一 agent 的 Flow 在 SME/VFE 上算，不访问 NAND</td></tr>
+    <tr><td>共享读</td><td>按物理 block 计，天然去重</td><td>多 agent 的共享权重物理读<strong>只计一次</strong></td></tr>
+  </tbody>
+</table>
+<p><strong>近存计算</strong>（HBFSim 完全没有的维度）：Synapse 把 <code>Shared MAC Engine</code>（SME）和 <code>Vector Function Engine</code>（VFE）放在 <strong>HBF base die</strong> 上，<strong>Flow</strong> 用 HBM 里的 KV 做 attention，<strong>Fuse</strong> 用 NAND 里的权重做 MoE expert；GPU 只做 prefill、QKV、路由和残差。参数（论文 Table 1）：<strong>2048 个 BF16 MAC @ 400 MHz</strong>（≈1.6 TFLOP/s）、32 MiB 数据通路、2048 个 active bank、4 KiB 页、tR=3 µs、tPROG=100 µs、UCIe D2D 1.536 TB/s。</p>
+<p class="muted">对 HBFSim 的含义：要评估这类设计，需要新增"base-die 计算引擎 + operand/result 流 + 与 GPU 的重叠"三要素；论文的 Table 1 可以直接当作一个场景输入。论文未提供开源代码。</p>
 
 <h2 id="systemc">6. 能否接入 SystemC 环境</h2>
 
@@ -1488,7 +1503,7 @@ target_compile_features(your_sc_model PRIVATE cxx_std_20)
 </ul>
 
 <div class="foot">
-  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-23。
+  本文档是本轮 HBF 建模 survey 的主文档（结构、接入、差距、参数、实测集中于此）。内容基于本地检出 <span class="src">/data/zhuo.wang/hbf_survey/FlashLabAE-HBFSim</span> 的源码、CMake 目标、文档与实测运行结果整理；最后更新 2026-11-25。
   文中"无 SystemC 依赖"为对该检出 <span class="src">src/ · cmake/ · CMakeLists.txt</span> 的全文检索结果。
 </div>
 
