@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 860" role="img" aria-label="Synapse 体系结构：部件与数据驻留">
+<defs>
+<marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b82a5"/></marker>
+<marker id="sg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7ee0b8"/></marker>
+<style>
+.t{fill:#e6e9f0;font:14px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.s{fill:#9aa4b8;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.g{fill:#8fe0b5;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.b{fill:#cfe3ff;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.y{fill:#f2c14e;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.pkg{fill:#0e131b;stroke:#3a4a6a;stroke-width:1.2;stroke-dasharray:7 5}
+.cap{fill:#151a24;stroke:#3a4358;stroke-width:1.2}
+.ctl{fill:#1a2130;stroke:#4a5a7a;stroke-width:1.3}
+.cmp{fill:#16241f;stroke:#37805e;stroke-width:1.4}
+.gpu{fill:#1b2130;stroke:#33405a;stroke-width:1.3}
+.ln{stroke:#6b82a5;stroke-width:1.4;fill:none;marker-end:url(#sa)}
+.lng{stroke:#7ee0b8;stroke-width:1.5;fill:none;marker-end:url(#sg)}
+</style>
+</defs>
+<rect width="1000" height="860" fill="#0f1117"/>
+<text x="34" y="38" class="t" text-anchor="start" style="font-size:17px">Synapse 的部件与数据驻留：算在 HBF 侧，调度在 HBM 侧</text>
+<text x="34" y="60" class="s" text-anchor="start">HBF stack 经 HBM stack 的 base die 连到 GPU；数据分三层——容量（NAND/DRAM）、逻辑（base die）、计算（SME/VFE）</text>
+<rect x="40" y="84" width="920" height="86" rx="8" class="gpu"/>
+<text x="58" y="112" class="t" text-anchor="start">GPU（SM / L2）</text>
+<text x="58" y="136" class="s" text-anchor="start">prefill · QKV / O 投影 · 路由 · 残差加</text>
+<text x="58" y="156" class="s" text-anchor="start">把任务 descriptor 发布到 HBM 侧 Task SRAM（含依赖与完成时间估计）</text>
+<text x="820" y="112" class="g" text-anchor="start">只做"它擅长的"</text>
+<text x="820" y="132" class="s" text-anchor="start">重活不在 GPU 上等</text>
+<rect x="50" y="196" width="900" height="290" rx="8" class="pkg"/>
+<text x="66" y="220" class="b" text-anchor="start">封装内（一个 HBM–HBF 对）</text>
+<rect x="70" y="236" width="400" height="232" rx="8" class="cap"/>
+<text x="84" y="258" class="t" text-anchor="start">HBM stack</text>
+<rect x="86" y="270" width="368" height="66" rx="6" class="ctl"/>
+<text x="100" y="294" class="b" text-anchor="start">HBM base die（控制/调度）</text>
+<text x="100" y="316" class="s" text-anchor="start">OIE 取操作数 · RWE 写回 · Task SRAM 依赖就绪</text>
+<rect x="86" y="352" width="368" height="96" rx="6" class="cap"/>
+<text x="100" y="376" class="t" text-anchor="start">HBM DRAM die（容量）</text>
+<text x="100" y="398" class="s" text-anchor="start">活跃权重（GPU 侧算子用）</text>
+<text x="100" y="418" class="s" text-anchor="start">活跃 KV · 操作数 · 结果</text>
+<rect x="530" y="236" width="400" height="232" rx="8" class="cap"/>
+<text x="544" y="258" class="t" text-anchor="start">HBF stack</text>
+<rect x="546" y="270" width="368" height="66" rx="6" class="cmp"/>
+<text x="560" y="294" class="g" text-anchor="start">HBF base die（计算）</text>
+<text x="560" y="316" class="s" text-anchor="start">SME 共享 MAC · VFE 向量函数 · 中间/Relay SRAM</text>
+<rect x="546" y="352" width="368" height="96" rx="6" class="cap"/>
+<text x="560" y="376" class="t" text-anchor="start">NAND die（容量，backing）</text>
+<text x="560" y="398" class="s" text-anchor="start">全量权重（不搬到 HBM/GPU）</text>
+<text x="560" y="418" class="s" text-anchor="start">shared-prefix KV · 暂停 agent 的 retained KV</text>
+<path class="ln" d="M300 172 L300 266"/>
+<text x="312" y="188" class="s" text-anchor="start">操作数 / 结果（经 L2）</text>
+<path class="ln" d="M470 300 L542 300"/>
+<text x="508" y="292" class="s" text-anchor="middle" style="font-size:11px">任务/操作数</text>
+<path class="lng" d="M732 338 L732 350"/>
+<text x="744" y="344" class="g" text-anchor="start">4 KB 页流</text>
+<path class="lng" d="M270 338 L270 350"/>
+<text x="150" y="348" class="g" text-anchor="start">读写</text>
+<rect x="50" y="520" width="440" height="104" rx="8" class="ctl"/>
+<text x="66" y="544" class="t" text-anchor="start">Flow（attention，KV 来自 HBM）</text>
+<text x="66" y="566" class="s" text-anchor="start">OIE 供 QKV → VFE 归一化/RoPE → SME 算 scores</text>
+<text x="66" y="586" class="s" text-anchor="start">VFE masked softmax → SME 算 P_rV + ΔP·V（V 双缓冲复用）</text>
+<text x="66" y="606" class="s" text-anchor="start">RWE 把 attention 结果写回 HBM</text>
+<rect x="510" y="520" width="440" height="104" rx="8" class="cmp"/>
+<text x="526" y="544" class="t" text-anchor="start">Fuse（MoE expert，权重来自 NAND）</text>
+<text x="526" y="566" class="s" text-anchor="start">GPU 路由后 OIE 供 hidden state 与 expert 分配</text>
+<text x="526" y="586" class="s" text-anchor="start">相同 expert 共享一条 NAND 权重流 → SME gate/up → VFE SiLU⊙</text>
+<text x="526" y="606" class="s" text-anchor="start">Relay SRAM → SME down 投影 → RWE 带 tag 写回</text>
+<rect x="50" y="636" width="440" height="104" rx="8" class="ctl"/>
+<text x="66" y="660" class="t" text-anchor="start">Forward（在 HBM 侧发任务）</text>
+<text x="66" y="682" class="s" text-anchor="start">比较 W_H+C_H 与 W_G+C_G 决定在 HBF 还是 GPU 执行</text>
+<text x="66" y="702" class="s" text-anchor="start">无需 GPU 命令即可发 Read DMA；issued 位防重复</text>
+<text x="66" y="722" class="s" text-anchor="start">RWE 校验 tag → 写回 → 标记后继就绪（无软件轮询）</text>
+<rect x="510" y="636" width="440" height="104" rx="8" class="cmp"/>
+<text x="526" y="660" class="t" text-anchor="start">Fortify（wordline 级读干扰保护）</text>
+<text x="526" y="682" class="s" text-anchor="start">按 wordline 统计物理读；跨 agent 共享读只计一次</text>
+<text x="526" y="702" class="s" text-anchor="start">比较器在发读前预测压力，直接门控 read-enable</text>
+<text x="526" y="722" class="s" text-anchor="start">局部块拷贝刷新（S→D 经 ECC），与另一 agent 的 Flow 重叠</text>
+<rect x="50" y="752" width="900" height="86" rx="8" class="pkg"/>
+<text x="66" y="778" class="s" text-anchor="start">数据驻留要点：NAND = 全量权重 + 保留 KV；HBM = 活跃副本 + 活跃 KV；HBF base die 的 SRAM = 正在算的 tile。</text>
+<text x="66" y="804" class="s" text-anchor="start">HBF↔HBM 之间的 D2D 为 1.536 TB/s；同一份权重 / KV 可以同时存在"冷（NAND）"与"热（HBM）"两份副本。</text>
+</svg>
