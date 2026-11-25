@@ -811,6 +811,81 @@
 </figure>
 
 <p><strong>近存计算</strong>（HBFSim 完全没有的维度）：Synapse 把 <code>Shared MAC Engine</code>（SME）和 <code>Vector Function Engine</code>（VFE）放在 <strong>HBF base die</strong> 上，<strong>Flow</strong> 用 HBM 里的 KV 做 attention，<strong>Fuse</strong> 用 NAND 里的权重做 MoE expert；GPU 只做 prefill、QKV、路由和残差。参数（论文 Table 1）：<strong>2048 个 BF16 MAC @ 400 MHz</strong>（≈1.6 TFLOP/s）、32 MiB 数据通路、2048 个 active bank、4 KiB 页、tR=3 µs、tPROG=100 µs、UCIe D2D 1.536 TB/s。</p>
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 880" role="img" aria-label="Synapse 时序：跨 agent 重叠与刷新插入点">
+<defs><marker id="tm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa0bd"/></marker>
+<style>
+.t{fill:#e6e9f0;font:14px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.s{fill:#9aa4b8;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.g{fill:#8fe0b5;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.b{fill:#cfe3ff;font:12.5px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.y{fill:#f2c14e;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.bar{fill:#0b0f15;font:12px system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+.panel{fill:#101720;stroke:#2c3a52;stroke-width:1.2}
+</style></defs>
+<rect width="1000" height="880" fill="#0f1117"/>
+<text x="34.0" y="36" class="t" text-anchor="start" style="font-size:17px">同一时间轴上：A 在 HBF 上算，B 在 GPU 上 prefill —— 刷新挤进 NAND 空闲窗口</text>
+<text x="34.0" y="58" class="s" text-anchor="start">横轴归一化时间；上图"没有 Forward"是被动 HBF，下图是 Synapse</text>
+<rect x="20" y="78" width="960" height="196" rx="10" class="panel"/>
+<text x="36.0" y="102" class="t" text-anchor="start">① 基线（被动 HBF）：HBF 任务要等 GPU 下一条命令</text>
+<text x="36.0" y="132" class="s" text-anchor="start">Agent B · GPU</text>
+<rect x="190.0" y="118" width="547.2" height="28" rx="4" fill="#4a6fa5" opacity="0.92"/>
+<text x="463.6" y="136.0" class="bar" text-anchor="middle">prefill</text>
+<text x="36.0" y="180" class="s" text-anchor="start">Agent A · HBF</text>
+<rect x="190.0" y="166" width="547.2" height="28" rx="4" fill="#1b2130" stroke="#3a4358" stroke-dasharray="4 4"/>
+<rect x="737.2" y="166" width="114.0" height="28" rx="4" fill="#37805e" opacity="0.92"/>
+<text x="794.2" y="184.0" class="bar" text-anchor="middle">Flow</text>
+<rect x="851.2" y="166" width="98.8" height="28" rx="4" fill="#2a5e46" opacity="0.92"/>
+<text x="900.6" y="184.0" class="bar" text-anchor="middle">Fuse</text>
+<text x="463.6" y="214" class="s" text-anchor="middle">HBF 空闲：等 B 的 prefill 结束才允许发 A 的任务</text>
+<line x1="737.2" y1="112" x2="737.2" y2="240" stroke="#8fa0bd" stroke-dasharray="4 4"/>
+<text x="743.2" y="110" class="s" text-anchor="start">B prefill 结束</text>
+
+<rect x="20" y="290" width="960" height="280" rx="10" class="panel"/>
+<text x="36.0" y="314" class="t" text-anchor="start">② Synapse：A 的 Flow/Fuse 与 B 的 prefill 重叠；刷新插在 Flow 的 NAND 空闲窗口</text>
+<text x="36.0" y="344" class="s" text-anchor="start">Agent B · GPU</text>
+<rect x="190.0" y="330" width="547.2" height="28" rx="4" fill="#4a6fa5" opacity="0.92"/>
+<text x="463.6" y="348.0" class="bar" text-anchor="middle">prefill</text>
+<text x="36.0" y="392" class="s" text-anchor="start">Agent A · HBF</text>
+<rect x="250.8" y="378" width="197.6" height="28" rx="4" fill="#37805e" opacity="0.92"/>
+<text x="349.6" y="396.0" class="bar" text-anchor="middle">Flow</text>
+<rect x="463.6" y="378" width="197.6" height="28" rx="4" fill="#2a5e46" opacity="0.92"/>
+<text x="562.4" y="396.0" class="bar" text-anchor="middle">Fuse</text>
+<text x="36.0" y="442" class="s" text-anchor="start">Fortify</text>
+<rect x="296.4" y="428" width="121.6" height="24" rx="4" fill="#b8862f" opacity="0.9"/>
+<text x="357.2" y="444.0" class="y" text-anchor="middle">刷新</text>
+<text x="433.2" y="444" class="s" text-anchor="start">NAND 空闲（A 正在算 attention）</text>
+<text x="36.0" y="530" class="s" text-anchor="start">Forward</text>
+<line x1="235.6" y1="520" x2="668.8" y2="520" stroke="#6b82a5" stroke-width="1.4"/>
+<line x1="235.6" y1="520" x2="235.6" y2="504" stroke="#6b82a5" stroke-width="1.4" marker-end="url(#tm)"/>
+<text x="241.6" y="500" class="b" text-anchor="start">OIE 发 Read DMA（不等 GPU 命令）</text>
+<line x1="661.2" y1="520" x2="661.2" y2="504" stroke="#6b82a5" stroke-width="1.4" marker-end="url(#tm)"/>
+<text x="664.8" y="548" class="b" text-anchor="end">RWE 写回 → 标记后继就绪</text>
+<line x1="676.4" y1="322" x2="676.4" y2="548" stroke="#8fe0b5" stroke-dasharray="4 4"/>
+<text x="682.4" y="320" class="g" text-anchor="start">A 完成（含写回）</text>
+<line x1="190" y1="618" x2="950.0" y2="618" stroke="#3a4a6a"/>
+<line x1="190.0" y1="618" x2="190.0" y2="624" stroke="#3a4a6a"/>
+<text x="190.0" y="640" class="s" text-anchor="middle">0</text>
+<line x1="380.0" y1="618" x2="380.0" y2="624" stroke="#3a4a6a"/>
+<text x="380.0" y="640" class="s" text-anchor="middle">25%</text>
+<line x1="570.0" y1="618" x2="570.0" y2="624" stroke="#3a4a6a"/>
+<text x="570.0" y="640" class="s" text-anchor="middle">50%</text>
+<line x1="760.0" y1="618" x2="760.0" y2="624" stroke="#3a4a6a"/>
+<text x="760.0" y="640" class="s" text-anchor="middle">75%</text>
+<line x1="950.0" y1="618" x2="950.0" y2="624" stroke="#3a4a6a"/>
+<text x="950.0" y="640" class="s" text-anchor="middle">100%</text>
+<text x="190.0" y="662" class="s" text-anchor="start">归一化时间（基线总时长 = 100%）</text>
+<rect x="20" y="680" width="960" height="182" rx="10" class="panel"/>
+<text x="36.0" y="706" class="t" text-anchor="start">这张图对应的三个动作</text>
+<text x="36.0" y="732" class="s" text-anchor="start">1) Forward：OIE 在 B 还在 prefill 时就对 A 的 Fuse 发 Read DMA —— 去掉"等 GPU 命令"那段空档。</text>
+<text x="36.0" y="756" class="s" text-anchor="start">2) Fortify：刷新放在 A 的 Flow 窗口（Flow 只读 HBM 的 KV，不读 NAND），所以刷新不占专家计算的 NAND 带宽。</text>
+<text x="36.0" y="780" class="s" text-anchor="start">3) 多 agent 交错：HBF 计算、GPU prefill、NAND 刷新可同时进行，关键路径从"串行相加"变成"取最长"。</text>
+<text x="36.0" y="808" class="g" text-anchor="start">论文结果：端到端延迟 −48.92~66.60%，吞吐最高 2.98×，每 token 能耗 −64.48%，HBF 寿命 +46~47%。</text>
+<text x="36.0" y="834" class="s" text-anchor="start">比例是示意（B 的 prefill 按基线 72% 画），不是论文实测分解；数值结论以论文为准。</text>
+</svg>
+<figcaption>图 5-2　跨 agent 时间线：上为被动 HBF（HBF 任务要等 GPU 下一条命令），下为 Synapse（Flow/Fuse 与 prefill 重叠；Fortify 的局部刷新插在 Flow 的 NAND 空闲窗口；Forward 在 prefill 结束前就发任务，写回后立即标记后继就绪）。比例是示意，数值结论以论文为准。</figcaption>
+</figure>
+
 <p class="muted">对 HBFSim 的含义：要评估这类设计，需要新增"base-die 计算引擎 + operand/result 流 + 与 GPU 的重叠"三要素；论文的 Table 1 可以直接当作一个场景输入。论文未提供开源代码。</p>
 
 <h2 id="systemc">6. 能否接入 SystemC 环境</h2>
